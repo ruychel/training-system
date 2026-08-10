@@ -33,12 +33,12 @@
     const { useState, useEffect, useRef } = React;
 
     const firebaseConfig = {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_AUTH_DOMAIN",
-      projectId: "YOUR_PROJECT_ID",
-      storageBucket: "YOUR_STORAGE_BUCKET",
-      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-      appId: "YOUR_APP_ID"
+      apiKey: "AIzaSyAtkGBdvsddzMoUhv-JSahn2JuipzFoh8M",
+      authDomain: "global-training-2026.firebaseapp.com",
+      projectId: "global-training-2026",
+      storageBucket: "global-training-2026.firebasestorage.app",
+      messagingSenderId: "597871254165",
+      appId: "1:597871254165:web:df32675f6f8c10292d199c"
     };
 
     let db = null;
@@ -179,7 +179,6 @@
 
       const handleLogout = () => { setUser(null); localStorage.removeItem('training_user'); };
 
-      // Excel Upload (일정)
       const handleExcelUpload = (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -190,7 +189,7 @@
             const wb = XLSX.read(bstr, { type: 'binary' });
             const wsName = wb.SheetNames[0];
             const ws = wb.Sheets[wsName];
-            const data = XLSX.utils.sheet_to_json(ws, { raw: false, dateNF: 'yyyy-mm-dd' }); // raw: false로 줄바꿈 유지, 날짜 포맷 강제
+            const data = XLSX.utils.sheet_to_json(ws, { raw: false, dateNF: 'yyyy-mm-dd' });
 
             const parsedSchedules = data.map((row) => {
               const dateKey = Object.keys(row).find(k => k.includes('날짜') || k.toLowerCase().includes('date')) || Object.keys(row)[0];
@@ -199,9 +198,8 @@
               const locationKey = Object.keys(row).find(k => k.includes('장소') || k.toLowerCase().includes('location')) || Object.keys(row)[2];
               const contentKey = Object.keys(row).find(k => k.includes('활동') || k.includes('내용')) || Object.keys(row)[3];
               
-              // 날짜 포맷 정규화 (YYYY-MM-DD 형태로 변환하여 정렬 오류 방지)
               let rawDate = row[dateKey] ? String(row[dateKey]).trim() : '2026-09-10';
-              rawDate = rawDate.replace(/\./g, '-').replace(/\//g, '-').replace(/\s/g, ''); // 2026.09.10 -> 2026-09-10
+              rawDate = rawDate.replace(/\./g, '-').replace(/\//g, '-').replace(/\s/g, ''); 
               const dateParts = rawDate.split('-');
               if(dateParts.length === 3) {
                   rawDate = `${dateParts[0]}-${dateParts[1].padStart(2, '0')}-${dateParts[2].padStart(2, '0')}`;
@@ -224,7 +222,7 @@
                 endTime: endTime,
                 location: row[locationKey] ? String(row[locationKey]).trim() : '장소 미정',
                 content: row[contentKey] ? String(row[contentKey]) : '일정 내용 없음',
-                color: '#1e293b', // 엑셀 기본색상 지원 한계로 기본값 적용 (수정 시 변경 가능)
+                color: '#1e293b',
                 createdAt: new Date().toISOString()
               };
             });
@@ -242,7 +240,6 @@
         reader.readAsBinaryString(file);
       };
 
-      // CRUD Helpers (일정)
       const addSchedule = (data) => {
         if (isFirebaseConfigured && db) db.collection('schedules').add({ ...data, createdAt: new Date().toISOString() });
         else setSchedules(prev => [...prev, { ...data, id: 's_' + Date.now() }]);
@@ -257,7 +254,6 @@
         else setSchedules(prev => prev.filter(s => s.id !== id));
       };
 
-      // CRUD Helpers (공지 - 파일 업로드 포함)
       const submitNotice = async (e) => {
         e.preventDefault();
         const form = e.target;
@@ -299,7 +295,6 @@
         else setNotices(prev => prev.filter(n => n.id !== id));
       };
 
-      // CRUD Helpers (게시판/댓글)
       const addBoard = (content) => {
         const payload = { content, author: user.name, authorId: user.name, createdAt: new Date().toISOString(), comments: [] };
         if (isFirebaseConfigured && db) db.collection('boards').add(payload);
@@ -339,7 +334,6 @@
         }
       };
 
-      // 사진 업로드
       const uploadPhoto = (file, caption) => {
         if (!file) return;
         setIsUploading(true);
@@ -371,7 +365,6 @@
         else setPhotos(prev => prev.filter(p => p.id !== id));
       };
 
-      // 리뷰
       const addReview = (content) => {
         const payload = { content, author: user.name, authorId: user.name, createdAt: new Date().toISOString() };
         if (isFirebaseConfigured && db) db.collection('reviews').add(payload);
@@ -411,17 +404,13 @@
         });
       };
 
-      // 공유 링크 복사 (404 방지를 위해 오리진 주소만 복사)
       const copyInviteLink = () => {
         const shareUrl = window.location.origin + '/'; 
         navigator.clipboard.writeText(shareUrl).then(() => {
-          alert(`링크 복사 완료!
-
-모바일 오류 방지를 위해 기본 도메인(${shareUrl})이 복사되었습니다.`);
+          alert(`링크 복사 완료!\n\n모바일 오류 방지를 위해 기본 도메인(${shareUrl})이 복사되었습니다.`);
         }).catch(() => alert('복사 실패'));
       };
 
-      // --- Schedule Grouping Logic ---
       const groupedSchedules = schedules.reduce((acc, curr) => {
         if (!acc[curr.date]) acc[curr.date] = [];
         acc[curr.date].push(curr);
@@ -490,7 +479,6 @@
 
           <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 space-y-6">
             
-            {/* SCHEDULE */}
             {activeTab === 'schedule' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -504,12 +492,9 @@
                 <div className="space-y-6">
                   {sortedScheduleDates.map(dateKey => (
                     <div key={dateKey} className="space-y-3">
-                      {/* 날짜 헤더 표시 */}
                       <div className="sticky top-16 z-20 bg-slate-100 py-2 font-extrabold text-slate-700 border-b-2 border-slate-200">
                         {dateKey}
                       </div>
-                      
-                      {/* 해당 날짜의 일정 목록 */}
                       <div className="space-y-3 pl-2 sm:pl-4 border-l-2 border-slate-200 ml-2">
                         {groupedSchedules[dateKey].map((item) => (
                           <div key={item.id} className="bg-white rounded-2xl p-4 border shadow-sm flex flex-col sm:flex-row justify-between gap-4 relative">
@@ -520,7 +505,6 @@
                               </div>
                               <div>
                                 <div className="flex items-center text-xs font-semibold text-emerald-600 mb-1"><Icon name="map-pin" size={14} className="mr-1" />{item.location}</div>
-                                {/* whitespace-pre-line으로 줄바꿈 자동 적용 */}
                                 <h3 className="text-base font-bold whitespace-pre-line" style={{ color: item.color || '#1e293b' }}>{item.content}</h3>
                               </div>
                             </div>
@@ -539,7 +523,6 @@
               </div>
             )}
 
-            {/* NOTICE */}
             {activeTab === 'notice' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -564,7 +547,6 @@
               </div>
             )}
 
-            {/* BOARD */}
             {activeTab === 'board' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -608,7 +590,6 @@
               </div>
             )}
 
-            {/* GALLERY */}
             {activeTab === 'gallery' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -634,7 +615,6 @@
               </div>
             )}
 
-            {/* REVIEW */}
             {activeTab === 'review' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -663,7 +643,6 @@
               </div>
             )}
 
-            {/* SETTINGS */}
             {activeTab === 'settings' && user.isAdmin && (
               <div className="space-y-6">
                 <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Icon name="settings" size={22} className="text-sky-500" /> 설정</h2>
@@ -704,7 +683,6 @@
             )}
           </main>
 
-          {/* LIGHTBOX */}
           {lightboxImg && (
             <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
               <div className="relative max-w-3xl w-full flex flex-col items-center">
@@ -718,7 +696,6 @@
             </div>
           )}
 
-          {/* MODALS */}
           {modalState.type && (
             <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
@@ -729,7 +706,6 @@
                   <button onClick={() => setModalState({ type: null })}><Icon name="x" size={20} /></button>
                 </div>
                 
-                {/* 폼 처리 */}
                 {modalState.type === 'add_notice' ? (
                    <form onSubmit={submitNotice} className="space-y-3">
                       <input name="title" placeholder="제목" required className="w-full p-3 border rounded-xl text-sm" />
