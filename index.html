@@ -61,6 +61,16 @@
       return <i data-lucide={name} style={{ width: size, height: size, display: 'inline-block' }} class={className}></i>;
     };
 
+    // 5MB 용량 제한 체크 함수
+    const checkFileSize = (file) => {
+      const maxSize = 5 * 1024 * 1024; // 5MB
+      if (file.size > maxSize) {
+        alert(`파일 용량이 너무 크다. (현재: ${(file.size / 1024 / 1024).toFixed(1)}MB)\n5MB 이하의 파일만 업로드할 수 있다.`);
+        return false;
+      }
+      return true;
+    };
+
     function GlobalTrainingApp() {
       const [user, setUser] = useState(() => {
         const saved = localStorage.getItem('training_user');
@@ -204,11 +214,13 @@
         const content = form.content.value;
         const file = form.noticeFile?.files[0];
         
-        setIsUploading(true);
         let fileUrl = '';
         let fileName = '';
 
         if (file) {
+          if (!checkFileSize(file)) return; // 5MB 제한 체크
+          
+          setIsUploading(true);
           fileName = file.name;
           if (isFirebaseConfigured && storage) {
             const fileRef = storage.ref(`notices/${Date.now()}_${file.name}`);
@@ -216,19 +228,19 @@
               const snapshot = await fileRef.put(file);
               fileUrl = await snapshot.ref.getDownloadURL();
             } catch (err) {
-              alert('파일 업로드에 실패했다. Storage 규칙을 확인하라: ' + err.message);
+              alert('스토리지 업로드 거부됨. 파이어베이스 Storage 규칙 및 요금제 상태를 확인하라.\n에러 내용: ' + err.message);
               setIsUploading(false);
               return;
             }
           } else {
-             alert('서버 스토리지 연결이 되어있지 않다.');
+             alert('서버 스토리지(Storage)가 초기화되지 않았다. 파이어베이스 설정을 확인하라.');
              setIsUploading(false);
              return;
           }
         }
 
         const payload = { title, content, fileName, fileUrl, author: user.name, createdAt: new Date().toISOString() };
-        if (isFirebaseConfigured && db) db.collection('notices').add(payload);
+        if (isFirebaseConfigured && db) await db.collection('notices').add(payload);
         
         setIsUploading(false);
         setModalState({ type: null });
@@ -257,6 +269,8 @@
 
       const uploadPhoto = async (file, caption) => {
         if (!file) return;
+        if (!checkFileSize(file)) return; // 5MB 제한 체크
+
         setIsUploading(true);
         if (isFirebaseConfigured && storage && db) {
           const fileRef = storage.ref(`photos/${Date.now()}_${file.name}`);
@@ -265,8 +279,10 @@
             const url = await snapshot.ref.getDownloadURL();
             await db.collection('photos').add({ url, caption, author: user.name, authorId: user.name, createdAt: new Date().toISOString() });
           } catch(err) {
-            alert('사진 업로드 실패: ' + err.message);
+            alert('사진 업로드 실패. 스토리지 설정을 확인하라: ' + err.message);
           }
+        } else {
+            alert('서버 스토리지가 연결되어 있지 않다.');
         }
         setIsUploading(false);
         setModalState({ type: null });
@@ -280,6 +296,11 @@
       const handleBgUpload = async (e) => {
         const file = e.target.files[0];
         if(!file) return;
+        if (!checkFileSize(file)) {
+            e.target.value = ''; // 입력 초기화
+            return; 
+        }
+
         setIsBgUploading(true);
         if (isFirebaseConfigured && storage && db) {
           const fileRef = storage.ref(`system/bg_${Date.now()}_${file.name}`);
@@ -596,7 +617,7 @@
                    <form onSubmit={submitNotice} className="space-y-3">
                       <input name="title" placeholder="제목" required className="w-full p-3 border rounded-xl text-sm" />
                       <textarea name="content" placeholder="공지 내용..." required rows={4} className="w-full p-3 border rounded-xl text-sm" />
-                      <label className="block text-xs font-bold text-slate-600 mb-1">첨부파일 (문서 및 이미지 가능)</label>
+                      <label className="block text-xs font-bold text-slate-600 mb-1">첨부파일 (5MB 이하 문서/이미지)</label>
                       <input name="noticeFile" type="file" className="w-full p-2 border rounded-xl text-sm" />
                       {isUploading && <p className="text-xs text-sky-500 animate-pulse pt-2">서버에 파일을 업로드 중이다...</p>}
                       <div className="flex space-x-2 pt-2">
