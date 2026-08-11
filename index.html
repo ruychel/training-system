@@ -17,6 +17,7 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
   <style>
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #f1f5f9; }
@@ -31,7 +32,6 @@
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
-    // 1. 파이어베이스 접속 키 (본인의 키로 유지할 것)
     const firebaseConfig = {
       apiKey: "AIzaSyAtkGBdvsddzMoUhv-JSahn2JuipzFoh8M",
       authDomain: "global-training-2026.firebaseapp.com",
@@ -41,16 +41,15 @@
       appId: "1:597871254165:web:df32675f6f8c10292d199c"
     };
 
-    // 2. ImgBB 무료 이미지 호스팅 API 키 (여기에 발급받은 키를 넣는다)
-    const IMGBB_API_KEY = "8bf23134d090fd9599798f4a646fbc95";
-
     let db = null;
+    let storage = null;
     let isFirebaseConfigured = false;
 
     try {
       if (!firebase.apps.length && firebaseConfig.apiKey !== "YOUR_API_KEY") {
         firebase.initializeApp(firebaseConfig);
         db = firebase.firestore();
+        storage = firebase.storage();
         isFirebaseConfigured = true;
       }
     } catch (e) {
@@ -60,21 +59,6 @@
     const Icon = ({ name, size = 20, className = "" }) => {
       useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name]);
       return <i data-lucide={name} style={{ width: size, height: size, display: 'inline-block' }} class={className}></i>;
-    };
-
-    // 공통 ImgBB 업로드 함수
-    const uploadToImgBB = async (file) => {
-      const formData = new FormData();
-      formData.append('image', file);
-      try {
-        const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, { method: 'POST', body: formData });
-        const data = await res.json();
-        if (data.success) return data.data.url;
-        throw new Error(data.error.message);
-      } catch (err) {
-        alert("이미지 업로드 실패: " + err.message);
-        return null;
-      }
     };
 
     function GlobalTrainingApp() {
@@ -105,7 +89,7 @@
 
       const [lightboxImg, setLightboxImg] = useState(null);
       const [modalState, setModalState] = useState({ type: null, data: null });
-      const [uploadProgress, setUploadProgress] = useState(0); // ImgBB는 프로그레스 바 미지원으로 애니메이션 대체
+      const [uploadProgress, setUploadProgress] = useState(0); 
       const [isUploading, setIsUploading] = useState(false);
       const [isBgUploading, setIsBgUploading] = useState(false);
 
@@ -167,6 +151,11 @@
             const ws = wb.Sheets[wsName];
             const data = XLSX.utils.sheet_to_json(ws, { raw: false, dateNF: 'yyyy-mm-dd' });
 
+            if (data.length === 0) {
+              alert('엑셀 파일에서 데이터를 읽을 수 없다. 빈 파일이거나 양식이 잘못되었는지 확인하라.');
+              return;
+            }
+
             const parsedSchedules = data.map((row) => {
               const dateKey = Object.keys(row).find(k => k.includes('날짜') || k.toLowerCase().includes('date')) || Object.keys(row)[0];
               const timeKey = Object.keys(row).find(k => k.includes('시간') || k.toLowerCase().includes('time') || k.includes('시작')) || Object.keys(row)[1];
@@ -177,7 +166,11 @@
               let rawDate = row[dateKey] ? String(row[dateKey]).trim() : '2026-09-10';
               rawDate = rawDate.replace(/\./g, '-').replace(/\//g, '-').replace(/\s/g, ''); 
               const dateParts = rawDate.split('-');
-              if(dateParts.length === 3) rawDate = `${dateParts[0]}-${dateParts[1].padStart(2, '0')}-${dateParts[2].padStart(2, '0')}`;
+              if(dateParts.length === 3) {
+                  const y = dateParts[0].length === 2 ? '20' + dateParts[0] : dateParts[0];
+                  rawDate = `${y}-${dateParts[1].padStart(2, '0')}-${dateParts[2].padStart(2, '0')}`;
+              }
+
               let startTime = row[timeKey] ? String(row[timeKey]).trim() : '09:00';
               let endTime = endTimeKey && row[endTimeKey] ? String(row[endTimeKey]).trim() : '';
               if (!endTime && (startTime.includes('~') || startTime.includes('-'))) {
@@ -191,16 +184,18 @@
             if (isFirebaseConfigured && db) {
               const batch = db.batch();
               parsedSchedules.forEach(item => { batch.set(db.collection('schedules').doc(), item); });
-              batch.commit().then(() => alert(`총 ${parsedSchedules.length}건 추가 완료`));
+              batch.commit()
+                .then(() => alert(`성공적으로 총 ${parsedSchedules.length}건의 일정을 추가했다.`))
+                .catch(err => alert('데이터베이스 저장 중 오류가 발생했다: ' + err.message));
             }
-          } catch (err) { alert('엑셀 파싱 오류: ' + err.message); }
+          } catch (err) { alert('엑셀 파일 파싱 오류: 데이터 형식을 다시 확인하라. (' + err.message + ')'); }
         };
         reader.readAsBinaryString(file);
       };
 
       const addSchedule = (data) => { if (isFirebaseConfigured && db) db.collection('schedules').add({ ...data, createdAt: new Date().toISOString() }); };
       const editSchedule = (id, data) => { if (isFirebaseConfigured && db) db.collection('schedules').doc(id).update(data); };
-      const deleteSchedule = (id) => { if (confirm('삭제하시겠습니까?') && isFirebaseConfigured && db) db.collection('schedules').doc(id).delete(); };
+      const deleteSchedule = (id) => { if (confirm('삭제하겠는가?') && isFirebaseConfigured && db) db.collection('schedules').doc(id).delete(); };
 
       const submitNotice = async (e) => {
         e.preventDefault();
@@ -214,14 +209,22 @@
         let fileName = '';
 
         if (file) {
-          if (!file.type.startsWith('image/')) {
-            alert("무료 호스팅 정책상 공지사항 첨부파일은 '이미지 파일'만 업로드 가능합니다.");
-            setIsUploading(false);
-            return;
-          }
           fileName = file.name;
-          fileUrl = await uploadToImgBB(file);
-          if (!fileUrl) { setIsUploading(false); return; }
+          if (isFirebaseConfigured && storage) {
+            const fileRef = storage.ref(`notices/${Date.now()}_${file.name}`);
+            try {
+              const snapshot = await fileRef.put(file);
+              fileUrl = await snapshot.ref.getDownloadURL();
+            } catch (err) {
+              alert('파일 업로드에 실패했다. Storage 규칙을 확인하라: ' + err.message);
+              setIsUploading(false);
+              return;
+            }
+          } else {
+             alert('서버 스토리지 연결이 되어있지 않다.');
+             setIsUploading(false);
+             return;
+          }
         }
 
         const payload = { title, content, fileName, fileUrl, author: user.name, createdAt: new Date().toISOString() };
@@ -230,11 +233,11 @@
         setIsUploading(false);
         setModalState({ type: null });
       };
-      const deleteNotice = (id) => { if (confirm('삭제하시겠습니까?') && isFirebaseConfigured && db) db.collection('notices').doc(id).delete(); };
+      const deleteNotice = (id) => { if (confirm('삭제하겠는가?') && isFirebaseConfigured && db) db.collection('notices').doc(id).delete(); };
 
       const addBoard = (content) => { if (isFirebaseConfigured && db) db.collection('boards').add({ content, author: user.name, authorId: user.name, createdAt: new Date().toISOString(), comments: [] }); };
       const editBoard = (id, content) => { if (isFirebaseConfigured && db) db.collection('boards').doc(id).update({ content }); };
-      const deleteBoard = (id) => { if (confirm('삭제하시겠습니까?') && isFirebaseConfigured && db) db.collection('boards').doc(id).delete(); };
+      const deleteBoard = (id) => { if (confirm('삭제하겠는가?') && isFirebaseConfigured && db) db.collection('boards').doc(id).delete(); };
       
       const addComment = (boardId, commentText) => {
         if (!commentText.trim() || !isFirebaseConfigured || !db) return;
@@ -253,37 +256,51 @@
       };
 
       const uploadPhoto = async (file, caption) => {
-        if (!file || IMGBB_API_KEY === "여기에_IMGBB_API_키를_입력하세요") { alert("ImgBB API 키를 먼저 입력해야 합니다."); return; }
+        if (!file) return;
         setIsUploading(true);
-        const url = await uploadToImgBB(file);
-        if (url && isFirebaseConfigured && db) {
-          await db.collection('photos').add({ url, caption, author: user.name, authorId: user.name, createdAt: new Date().toISOString() });
+        if (isFirebaseConfigured && storage && db) {
+          const fileRef = storage.ref(`photos/${Date.now()}_${file.name}`);
+          try {
+            const snapshot = await fileRef.put(file);
+            const url = await snapshot.ref.getDownloadURL();
+            await db.collection('photos').add({ url, caption, author: user.name, authorId: user.name, createdAt: new Date().toISOString() });
+          } catch(err) {
+            alert('사진 업로드 실패: ' + err.message);
+          }
         }
         setIsUploading(false);
         setModalState({ type: null });
       };
-      const deletePhoto = (id) => { if (confirm('삭제하시겠습니까?') && isFirebaseConfigured && db) db.collection('photos').doc(id).delete(); };
+      const deletePhoto = (id) => { if (confirm('삭제하겠는가?') && isFirebaseConfigured && db) db.collection('photos').doc(id).delete(); };
 
       const addReview = (content) => { if (isFirebaseConfigured && db) db.collection('reviews').add({ content, author: user.name, authorId: user.name, createdAt: new Date().toISOString() }); };
       const editReview = (id, content) => { if (isFirebaseConfigured && db) db.collection('reviews').doc(id).update({ content }); };
-      const deleteReview = (id) => { if (confirm('삭제하시겠습니까?') && isFirebaseConfigured && db) db.collection('reviews').doc(id).delete(); };
+      const deleteReview = (id) => { if (confirm('삭제하겠는가?') && isFirebaseConfigured && db) db.collection('reviews').doc(id).delete(); };
 
       const handleBgUpload = async (e) => {
         const file = e.target.files[0];
         if(!file) return;
         setIsBgUploading(true);
-        const url = await uploadToImgBB(file);
-        if (url && isFirebaseConfigured && db) {
-          const newSettings = { ...systemSettings, bgUrl: url };
-          db.collection('system').doc('settings').set(newSettings, {merge:true});
-          setSystemSettings(newSettings);
+        if (isFirebaseConfigured && storage && db) {
+          const fileRef = storage.ref(`system/bg_${Date.now()}_${file.name}`);
+          try {
+             const snapshot = await fileRef.put(file);
+             const url = await snapshot.ref.getDownloadURL();
+             const newSettings = { ...systemSettings, bgUrl: url };
+             db.collection('system').doc('settings').set(newSettings, {merge:true});
+             setSystemSettings(newSettings);
+          } catch(err) {
+             alert('배경화면 업데이트 실패: ' + err.message);
+          }
         }
         setIsBgUploading(false);
       };
 
       const copyInviteLink = () => {
-        const shareUrl = window.location.origin + '/'; 
-        navigator.clipboard.writeText(shareUrl).then(() => alert(`링크 복사 완료!\n\n${shareUrl}`)).catch(() => alert('복사 실패'));
+        const shareUrl = window.location.href.split('?')[0].split('#')[0]; 
+        navigator.clipboard.writeText(shareUrl)
+          .then(() => alert(`접속 링크 복사가 완료되었다!\n\n복사된 주소: ${shareUrl}`))
+          .catch(() => alert('링크 복사에 실패했다.'));
       };
 
       const groupedSchedules = schedules.reduce((acc, curr) => {
@@ -411,7 +428,7 @@
                         {(user.isAdmin || user.name === n.author) && <button onClick={() => deleteNotice(n.id)} className="text-slate-300 hover:text-rose-500 p-1"><Icon name="trash-2" size={18} /></button>}
                       </div>
                       <p className="text-sm text-slate-600 whitespace-pre-line">{n.content}</p>
-                      {n.fileUrl && <img src={n.fileUrl} className="w-full h-auto rounded-lg mt-2 border" />}
+                      {n.fileName && <a href={n.fileUrl || '#'} download target="_blank" className="inline-flex items-center px-3 py-2 bg-slate-50 border rounded-xl text-xs font-medium text-slate-700 space-x-2"><Icon name="paperclip" size={14} /><span>{n.fileName}</span></a>}
                     </div>
                   ))}
                 </div>
@@ -579,9 +596,9 @@
                    <form onSubmit={submitNotice} className="space-y-3">
                       <input name="title" placeholder="제목" required className="w-full p-3 border rounded-xl text-sm" />
                       <textarea name="content" placeholder="공지 내용..." required rows={4} className="w-full p-3 border rounded-xl text-sm" />
-                      <label className="block text-xs font-bold text-slate-600 mb-1">첨부파일 (이미지만 가능)</label>
-                      <input name="noticeFile" type="file" accept="image/*" className="w-full p-2 border rounded-xl text-sm" />
-                      {isUploading && <p className="text-xs text-sky-500 animate-pulse">이미지 서버에 업로드 중입니다...</p>}
+                      <label className="block text-xs font-bold text-slate-600 mb-1">첨부파일 (문서 및 이미지 가능)</label>
+                      <input name="noticeFile" type="file" className="w-full p-2 border rounded-xl text-sm" />
+                      {isUploading && <p className="text-xs text-sky-500 animate-pulse pt-2">서버에 파일을 업로드 중이다...</p>}
                       <div className="flex space-x-2 pt-2">
                         <button type="button" onClick={() => setModalState({ type: null })} className="flex-1 py-3 bg-slate-100 font-bold rounded-xl text-xs">취소</button>
                         <button type="submit" disabled={isUploading} className="flex-1 py-3 bg-sky-500 text-white font-bold rounded-xl text-xs">확인</button>
@@ -629,14 +646,14 @@
                     )}
 
                     {(modalState.type === 'add_board' || modalState.type === 'edit_board') && (
-                      <textarea name="content" placeholder="내용을 작성해주세요..." required rows={4} defaultValue={modalState.data?.content} className="w-full p-3 border rounded-xl text-sm" />
+                      <textarea name="content" placeholder="내용을 작성하라..." required rows={4} defaultValue={modalState.data?.content} className="w-full p-3 border rounded-xl text-sm" />
                     )}
                     
                     {modalState.type === 'upload_photo' && (
                       <>
                         <input name="photoFile" type="file" accept="image/*" required className="w-full p-2 border rounded-xl text-sm" />
                         <input name="caption" placeholder="사진 캡션 (설명)" className="w-full p-3 border rounded-xl text-sm" />
-                        {isUploading && <p className="text-xs text-sky-500 animate-pulse pt-2">이미지 서버에 업로드 중입니다. 잠시만 기다려주세요...</p>}
+                        {isUploading && <p className="text-xs text-sky-500 animate-pulse pt-2">서버에 업로드 중이다. 잠시만 기다려라...</p>}
                       </>
                     )}
 
