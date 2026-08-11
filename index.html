@@ -70,7 +70,6 @@
       return true;
     };
 
-    // 링크 자동 변환 함수 추가
     const renderTextWithLinks = (text) => {
       if (!text) return null;
       const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -84,6 +83,13 @@
           part
         )
       );
+    };
+
+    // 요일 자동 계산 함수 추가
+    const getDayOfWeek = (dateStr) => {
+      const days = ['일', '월', '화', '수', '목', '금', '토'];
+      const d = new Date(dateStr);
+      return isNaN(d) ? '' : `(${days[d.getDay()]})`;
     };
 
     function GlobalTrainingApp() {
@@ -114,7 +120,6 @@
 
       const [lightboxImg, setLightboxImg] = useState(null);
       const [modalState, setModalState] = useState({ type: null, data: null });
-      const [uploadProgress, setUploadProgress] = useState(0); 
       const [isUploading, setIsUploading] = useState(false);
       const [isBgUploading, setIsBgUploading] = useState(false);
 
@@ -189,7 +194,8 @@
               const contentKey = Object.keys(row).find(k => k.includes('활동') || k.includes('내용')) || Object.keys(row)[3];
               
               let rawDate = row[dateKey] ? String(row[dateKey]).trim() : '2026-09-10';
-              rawDate = rawDate.replace(/\./g, '-').replace(/\//g, '-').replace(/\s/g, ''); 
+              // 엑셀 내의 요일(토) 등 문자열 제거, 숫자와 하이픈만 남겨서 YYYY-MM-DD 강제 통일
+              rawDate = rawDate.replace(/\./g, '-').replace(/\//g, '-').replace(/[^\d-]/g, ''); 
               const dateParts = rawDate.split('-');
               if(dateParts.length === 3) {
                   const y = dateParts[0].length === 2 ? '20' + dateParts[0] : dateParts[0];
@@ -339,9 +345,11 @@
           .catch(() => alert('링크 복사에 실패했다.'));
       };
 
+      // 10자리 표준 날짜로 강력한 그룹화 적용
       const groupedSchedules = schedules.reduce((acc, curr) => {
-        if (!acc[curr.date]) acc[curr.date] = [];
-        acc[curr.date].push(curr);
+        const dateOnly = (curr.date || '').substring(0, 10);
+        if (!acc[dateOnly]) acc[dateOnly] = [];
+        acc[dateOnly].push(curr);
         return acc;
       }, {});
       const sortedScheduleDates = Object.keys(groupedSchedules).sort();
@@ -418,7 +426,10 @@
                 <div className="space-y-6">
                   {sortedScheduleDates.map(dateKey => (
                     <div key={dateKey} className="space-y-3">
-                      <div className="sticky top-16 z-20 bg-slate-100 py-2 font-extrabold text-slate-700 border-b-2 border-slate-200">{dateKey}</div>
+                      {/* 그룹 헤더 출력 시 계산된 요일(getDayOfWeek)을 자동으로 붙여서 보여줌 */}
+                      <div className="sticky top-16 z-20 bg-slate-100 py-2 font-extrabold text-slate-700 border-b-2 border-slate-200">
+                        {dateKey}{getDayOfWeek(dateKey)}
+                      </div>
                       <div className="space-y-3 pl-2 sm:pl-4 border-l-2 border-slate-200 ml-2">
                         {groupedSchedules[dateKey].map((item) => (
                           <div key={item.id} className="bg-white rounded-2xl p-4 border shadow-sm flex flex-col sm:flex-row justify-between gap-4 relative">
@@ -666,7 +677,8 @@
                     
                     {(modalState.type === 'add_schedule' || modalState.type === 'edit_schedule') && (
                       <>
-                        <input name="date" type="date" required defaultValue={modalState.data?.date} className="w-full p-3 border rounded-xl text-sm" />
+                        {/* 폼 날짜 입력창에 요일 문자가 들어가 에러나는 것을 방지하기 위해 앞 10자리(YYYY-MM-DD)만 잘라넣음 */}
+                        <input name="date" type="date" required defaultValue={modalState.data?.date?.substring(0, 10)} className="w-full p-3 border rounded-xl text-sm" />
                         <div className="flex gap-2">
                           <input name="startTime" type="time" required defaultValue={modalState.data?.startTime} className="w-full p-3 border rounded-xl text-sm" />
                           <span className="flex items-center text-slate-400">~</span>
