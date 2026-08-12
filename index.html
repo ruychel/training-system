@@ -30,7 +30,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+    const { useState, useEffect } = React;
 
     const firebaseConfig = {
       apiKey: "AIzaSyAtkGBdvsddzMoUhv-JSahn2JuipzFoh8M",
@@ -52,22 +52,11 @@
         storage = firebase.storage();
         isFirebaseConfigured = true;
       }
-    } catch (e) {
-      console.warn("Firebase Init Error", e);
-    }
+    } catch (e) { console.warn("Firebase Init Error", e); }
 
     const Icon = ({ name, size = 20, className = "" }) => {
       useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name]);
       return <i data-lucide={name} style={{ width: size, height: size, display: 'inline-block' }} class={className}></i>;
-    };
-
-    const checkFileSize = (file) => {
-      const maxSize = 5 * 1024 * 1024; 
-      if (file.size > maxSize) {
-        alert(`파일 용량이 너무 크다. (현재: ${(file.size / 1024 / 1024).toFixed(1)}MB)\n5MB 이하의 파일만 업로드할 수 있다.`);
-        return false;
-      }
-      return true;
     };
 
     const renderTextWithLinks = (text) => {
@@ -79,9 +68,7 @@
           <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-sky-600 font-bold underline break-all hover:text-sky-800 transition-colors">
             {part}
           </a>
-        ) : (
-          part
-        )
+        ) : ( part )
       );
     };
 
@@ -91,19 +78,39 @@
       return isNaN(d) ? '' : `(${days[d.getDay()]})`;
     };
 
+    // 모바일 갤러리 저장용 네이티브 API (Web Share API) 연동 강제 다운로드 로직
     const forceDownload = async (fileUrl, fileName) => {
       try {
         const response = await fetch(fileUrl);
         const blob = await response.blob();
+        const fileNameStr = fileName || `training_photo_${Date.now()}.jpg`;
+        const file = new File([blob], fileNameStr, { type: blob.type || 'image/jpeg' });
+
+        // 모바일 환경에서 갤러리 저장을 지원하는 네이티브 공유 API 우선 실행
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({
+              files: [file],
+              title: '사진 저장'
+            });
+            return; // 갤러리에 저장 완료 시 함수 종료
+          } catch (shareErr) {
+            console.log('공유 취소됨');
+            return; 
+          }
+        }
+
+        // PC 환경이거나 공유 API를 지원하지 않을 경우 기존 브라우저 강제 다운로드 실행
         const blobUrl = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = blobUrl;
-        link.download = fileName || `training_download_${Date.now()}.jpg`;
+        link.download = fileNameStr;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         window.URL.revokeObjectURL(blobUrl);
       } catch (err) {
+        // 보안/CORS 문제로 가져오지 못한 경우 새 창 열기
         window.open(fileUrl, '_blank');
       }
     };
@@ -113,78 +120,168 @@
         const saved = localStorage.getItem('training_user');
         return saved ? JSON.parse(saved) : null;
       });
-      const [loginName, setLoginName] = useState('');
-      const [loginPw, setLoginPw] = useState('');
-      const [rememberMe, setRememberMe] = useState(true);
       const [isAdminLogin, setIsAdminLogin] = useState(false);
-
       const [activeTab, setActiveTab] = useState('schedule');
-
-      const [systemSettings, setSystemSettings] = useState({
-        title: "2026 Global Welfare Overseas Training",
-        description: "글로벌 사회복지 현장 탐방 및 네트워크 구축 연수",
-        bgUrl: "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=1200&q=80",
-        adminPw: "1234"
-      });
-
+      const [modalState, setModalState] = useState({ type: null, data: null });
+      const [isUploading, setIsUploading] = useState(false);
+      const [selectedFiles, setSelectedFiles] = useState([]);
       const [schedules, setSchedules] = useState([]);
       const [notices, setNotices] = useState([]);
       const [boards, setBoards] = useState([]);
       const [photos, setPhotos] = useState([]);
       const [reviews, setReviews] = useState([]);
-      const [participants, setParticipants] = useState([]);
-
-      const [lightboxImg, setLightboxImg] = useState(null);
-      const [modalState, setModalState] = useState({ type: null, data: null });
-      const [isUploading, setIsUploading] = useState(false);
-      const [isBgUploading, setIsBgUploading] = useState(false);
-      const [selectedFiles, setSelectedFiles] = useState([]);
 
       useEffect(() => {
         if (isFirebaseConfigured && db) {
-          const unsubSettings = db.collection('system').doc('settings').onSnapshot(doc => {
-            if (doc.exists) setSystemSettings(doc.data());
-          });
-          const unsubSchedules = db.collection('schedules').orderBy('date', 'asc').orderBy('startTime', 'asc').onSnapshot(snapshot => {
-            setSchedules(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-          });
-          const unsubNotices = db.collection('notices').orderBy('createdAt', 'desc').onSnapshot(snapshot => {
-            setNotices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-          });
-          const unsubBoards = db.collection('boards').orderBy('createdAt', 'desc').onSnapshot(snapshot => {
-            setBoards(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-          });
-          const unsubPhotos = db.collection('photos').orderBy('createdAt', 'desc').onSnapshot(snapshot => {
-            setPhotos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-          });
-          const unsubReviews = db.collection('reviews').orderBy('createdAt', 'desc').onSnapshot(snapshot => {
-            setReviews(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-          });
-          const unsubParticipants = db.collection('participants').onSnapshot(snapshot => {
-            setParticipants(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-          });
-          return () => { unsubSettings(); unsubSchedules(); unsubNotices(); unsubBoards(); unsubPhotos(); unsubReviews(); unsubParticipants(); };
+          db.collection('schedules').orderBy('date', 'asc').orderBy('startTime', 'asc').onSnapshot(s => setSchedules(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+          db.collection('notices').orderBy('createdAt', 'desc').onSnapshot(s => setNotices(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+          db.collection('boards').orderBy('createdAt', 'desc').onSnapshot(s => setBoards(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+          db.collection('photos').orderBy('createdAt', 'desc').onSnapshot(s => setPhotos(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+          db.collection('reviews').orderBy('createdAt', 'desc').onSnapshot(s => setReviews(s.docs.map(d => ({ id: d.id, ...d.data() }))));
         }
       }, [isFirebaseConfigured]);
 
-      const handleLogin = (e) => {
-        e.preventDefault();
-        if (!loginName.trim() || !loginPw.trim()) { alert('입력해주세요.'); return; }
-        let userData = null;
-        if (isAdminLogin || loginName.trim() === 'admin818') {
-          if (loginPw !== systemSettings.adminPw) { alert('비밀번호 오류'); return; }
-          userData = { name: 'admin818', role: 'admin', isAdmin: true };
-        } else {
-          userData = { name: loginName.trim(), role: 'user', isAdmin: false, id: loginName.trim() };
-          if (isFirebaseConfigured && db) {
-            db.collection('participants').doc(loginName.trim()).set({ name: loginName.trim(), lastLogin: new Date().toISOString(), role: 'user' }, { merge: true });
-          }
-        }
-        setUser(userData);
-        if (rememberMe) localStorage.setItem('training_user', JSON.stringify(userData));
+      const uploadPhotos = async (files, caption) => {
+        if (!files || files.length === 0) return;
+        setIsUploading(true);
+        try {
+          await Promise.all(Array.from(files).map(async (file) => {
+            const timeStamp = Date.now();
+            const compressed = await new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.readAsDataURL(file);
+              reader.onload = (e) => {
+                const img = new Image();
+                img.src = e.target.result;
+                img.onload = () => {
+                  const canvas = document.createElement('canvas');
+                  const scale = Math.min(1200 / img.width, 1200 / img.height, 1);
+                  canvas.width = img.width * scale; canvas.height = img.height * scale;
+                  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+                  canvas.toBlob((b) => resolve(new File([b], file.name, { type: 'image/jpeg' })), 'image/jpeg', 0.8);
+                };
+              };
+            });
+            const origPath = `photos/orig_${timeStamp}_${file.name}`;
+            const thumbPath = `photos/thumb_${timeStamp}_${file.name}`;
+            const [origSnap, thumbSnap] = await Promise.all([
+              storage.ref(origPath).put(file),
+              storage.ref(thumbPath).put(compressed)
+            ]);
+            await db.collection('photos').add({ 
+              url: await thumbSnap.ref.getDownloadURL(), 
+              originalUrl: await origSnap.ref.getDownloadURL(), 
+              origPath, thumbPath, caption, author: user.name, createdAt: new Date().toISOString() 
+            });
+          }));
+          alert('사진 업로드 완료.');
+        } catch(err) { alert('업로드 오류: ' + err.message); }
+        setIsUploading(false); setSelectedFiles([]); setModalState({ type: null });
       };
 
-      const handleLogout = () => { setUser(null); localStorage.removeItem('training_user'); };
+      const deletePhoto = async (id) => {
+        if (!confirm('삭제하겠는가?')) return;
+        try {
+          const docRef = db.collection('photos').doc(id);
+          const doc = await docRef.get();
+          if (doc.exists) {
+            const { origPath, thumbPath } = doc.data();
+            if (origPath) await storage.ref(origPath).delete();
+            if (thumbPath) await storage.ref(thumbPath).delete();
+          }
+          await docRef.delete();
+        } catch (e) { alert('파일 삭제 중 오류 발생 (이미 삭제되었을 수 있음): ' + e.message); }
+      };
+
+      const deleteNotice = async (id) => {
+        if (!confirm('삭제하겠는가?')) return;
+        try {
+          const docRef = db.collection('notices').doc(id);
+          const doc = await docRef.get();
+          if (doc.exists && doc.data().storagePath) {
+            await storage.ref(doc.data().storagePath).delete();
+          }
+          await docRef.delete();
+        } catch (e) { alert('공지사항 삭제 오류: ' + e.message); }
+      };
+
+      const checkFileSize = (file) => {
+        const maxSize = 5 * 1024 * 1024; 
+        if (file.size > maxSize) {
+          alert(`파일 용량이 너무 크다. (현재: ${(file.size / 1024 / 1024).toFixed(1)}MB)\n5MB 이하의 파일만 업로드할 수 있다.`);
+          return false;
+        }
+        return true;
+      };
+
+      const addSchedule = (data) => { if (isFirebaseConfigured && db) db.collection('schedules').add({ ...data, createdAt: new Date().toISOString() }); };
+      const editSchedule = (id, data) => { if (isFirebaseConfigured && db) db.collection('schedules').doc(id).update(data); };
+      const deleteSchedule = (id) => { if (confirm('삭제하겠는가?') && isFirebaseConfigured && db) db.collection('schedules').doc(id).delete(); };
+
+      const submitNotice = async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const title = form.title.value;
+        const content = form.content.value;
+        const file = form.noticeFile?.files[0];
+        
+        let fileUrl = '';
+        let fileName = '';
+        let storagePath = '';
+
+        if (file) {
+          if (!checkFileSize(file)) return; 
+          
+          setIsUploading(true);
+          fileName = file.name;
+          if (isFirebaseConfigured && storage) {
+            storagePath = `notices/${Date.now()}_${file.name}`;
+            const fileRef = storage.ref(storagePath);
+            try {
+              const snapshot = await fileRef.put(file);
+              fileUrl = await snapshot.ref.getDownloadURL();
+            } catch (err) {
+              alert('스토리지 업로드 거부됨. 파이어베이스 Storage 규칙 및 요금제 상태를 확인하라.\n에러 내용: ' + err.message);
+              setIsUploading(false);
+              return;
+            }
+          } else {
+             alert('서버 스토리지(Storage)가 초기화되지 않았다. 파이어베이스 설정을 확인하라.');
+             setIsUploading(false);
+             return;
+          }
+        }
+
+        const payload = { title, content, fileName, fileUrl, storagePath, author: user.name, createdAt: new Date().toISOString() };
+        if (isFirebaseConfigured && db) await db.collection('notices').add(payload);
+        
+        setIsUploading(false);
+        setModalState({ type: null });
+      };
+
+      const addBoard = (content) => { if (isFirebaseConfigured && db) db.collection('boards').add({ content, author: user.name, authorId: user.name, createdAt: new Date().toISOString(), comments: [] }); };
+      const editBoard = (id, content) => { if (isFirebaseConfigured && db) db.collection('boards').doc(id).update({ content }); };
+      const deleteBoard = (id) => { if (confirm('삭제하겠는가?') && isFirebaseConfigured && db) db.collection('boards').doc(id).delete(); };
+      
+      const addComment = (boardId, commentText) => {
+        if (!commentText.trim() || !isFirebaseConfigured || !db) return;
+        const newComment = { id: 'c_' + Date.now(), author: user.name, text: commentText, createdAt: new Date().toISOString() };
+        const boardRef = db.collection('boards').doc(boardId);
+        db.runTransaction(transaction => transaction.get(boardRef).then(doc => {
+          if (doc.exists) transaction.update(boardRef, { comments: [...(doc.data().comments || []), newComment] });
+        }));
+      };
+      const deleteComment = (boardId, commentId) => {
+        if (!isFirebaseConfigured || !db) return;
+        const boardRef = db.collection('boards').doc(boardId);
+        db.runTransaction(transaction => transaction.get(boardRef).then(doc => {
+          if (doc.exists) transaction.update(boardRef, { comments: (doc.data().comments || []).filter(c => c.id !== commentId) });
+        }));
+      };
+
+      const addReview = (content) => { if (isFirebaseConfigured && db) db.collection('reviews').add({ content, author: user.name, authorId: user.name, createdAt: new Date().toISOString() }); };
+      const editReview = (id, content) => { if (isFirebaseConfigured && db) db.collection('reviews').doc(id).update({ content }); };
+      const deleteReview = (id) => { if (confirm('삭제하겠는가?') && isFirebaseConfigured && db) db.collection('reviews').doc(id).delete(); };
 
       const handleExcelUpload = (e) => {
         const file = e.target.files[0];
@@ -241,163 +338,6 @@
         reader.readAsBinaryString(file);
       };
 
-      const addSchedule = (data) => { if (isFirebaseConfigured && db) db.collection('schedules').add({ ...data, createdAt: new Date().toISOString() }); };
-      const editSchedule = (id, data) => { if (isFirebaseConfigured && db) db.collection('schedules').doc(id).update(data); };
-      const deleteSchedule = (id) => { if (confirm('삭제하겠는가?') && isFirebaseConfigured && db) db.collection('schedules').doc(id).delete(); };
-
-      const submitNotice = async (e) => {
-        e.preventDefault();
-        const form = e.target;
-        const title = form.title.value;
-        const content = form.content.value;
-        const file = form.noticeFile?.files[0];
-        
-        let fileUrl = '';
-        let fileName = '';
-        let storagePath = '';
-
-        if (file) {
-          if (!checkFileSize(file)) return; 
-          
-          setIsUploading(true);
-          fileName = file.name;
-          if (isFirebaseConfigured && storage) {
-            storagePath = `notices/${Date.now()}_${file.name}`;
-            const fileRef = storage.ref(storagePath);
-            try {
-              const snapshot = await fileRef.put(file);
-              fileUrl = await snapshot.ref.getDownloadURL();
-            } catch (err) {
-              alert('스토리지 업로드 거부됨. 파이어베이스 Storage 규칙 및 요금제 상태를 확인하라.\n에러 내용: ' + err.message);
-              setIsUploading(false);
-              return;
-            }
-          } else {
-             alert('서버 스토리지(Storage)가 초기화되지 않았다. 파이어베이스 설정을 확인하라.');
-             setIsUploading(false);
-             return;
-          }
-        }
-
-        const payload = { title, content, fileName, fileUrl, storagePath, author: user.name, createdAt: new Date().toISOString() };
-        if (isFirebaseConfigured && db) await db.collection('notices').add(payload);
-        
-        setIsUploading(false);
-        setModalState({ type: null });
-      };
-
-      const deleteNotice = async (id) => {
-        if (!confirm('삭제하겠는가?')) return;
-        try {
-          const docRef = db.collection('notices').doc(id);
-          const doc = await docRef.get();
-          if (doc.exists && doc.data().storagePath) {
-            await storage.ref(doc.data().storagePath).delete();
-          }
-          await docRef.delete();
-        } catch (e) { alert('공지사항 삭제 오류: ' + e.message); }
-      };
-
-      const addBoard = (content) => { if (isFirebaseConfigured && db) db.collection('boards').add({ content, author: user.name, authorId: user.name, createdAt: new Date().toISOString(), comments: [] }); };
-      const editBoard = (id, content) => { if (isFirebaseConfigured && db) db.collection('boards').doc(id).update({ content }); };
-      const deleteBoard = (id) => { if (confirm('삭제하겠는가?') && isFirebaseConfigured && db) db.collection('boards').doc(id).delete(); };
-      
-      const addComment = (boardId, commentText) => {
-        if (!commentText.trim() || !isFirebaseConfigured || !db) return;
-        const newComment = { id: 'c_' + Date.now(), author: user.name, text: commentText, createdAt: new Date().toISOString() };
-        const boardRef = db.collection('boards').doc(boardId);
-        db.runTransaction(transaction => transaction.get(boardRef).then(doc => {
-          if (doc.exists) transaction.update(boardRef, { comments: [...(doc.data().comments || []), newComment] });
-        }));
-      };
-      const deleteComment = (boardId, commentId) => {
-        if (!isFirebaseConfigured || !db) return;
-        const boardRef = db.collection('boards').doc(boardId);
-        db.runTransaction(transaction => transaction.get(boardRef).then(doc => {
-          if (doc.exists) transaction.update(boardRef, { comments: (doc.data().comments || []).filter(c => c.id !== commentId) });
-        }));
-      };
-
-      const uploadPhotos = async (files, caption) => {
-        if (!files || files.length === 0) return;
-        setIsUploading(true);
-        try {
-          await Promise.all(Array.from(files).map(async (file) => {
-            const timeStamp = Date.now();
-            const compressed = await new Promise((resolve) => {
-              const reader = new FileReader();
-              reader.readAsDataURL(file);
-              reader.onload = (e) => {
-                const img = new Image();
-                img.src = e.target.result;
-                img.onload = () => {
-                  const canvas = document.createElement('canvas');
-                  const scale = Math.min(1200 / img.width, 1200 / img.height, 1);
-                  canvas.width = img.width * scale; canvas.height = img.height * scale;
-                  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-                  canvas.toBlob((b) => resolve(new File([b], file.name, { type: 'image/jpeg' })), 'image/jpeg', 0.8);
-                };
-              };
-            });
-            const origPath = `photos/orig_${timeStamp}_${file.name}`;
-            const thumbPath = `photos/thumb_${timeStamp}_${file.name}`;
-            const [origSnap, thumbSnap] = await Promise.all([
-              storage.ref(origPath).put(file),
-              storage.ref(thumbPath).put(compressed)
-            ]);
-            await db.collection('photos').add({ 
-              url: await thumbSnap.ref.getDownloadURL(), 
-              originalUrl: await origSnap.ref.getDownloadURL(), 
-              origPath, thumbPath, caption, author: user.name, createdAt: new Date().toISOString() 
-            });
-          }));
-          alert('사진 업로드 완료.');
-        } catch(err) { alert('업로드 오류: ' + err.message); }
-        setIsUploading(false); setSelectedFiles([]); setModalState({ type: null });
-      };
-
-      const deletePhoto = async (id) => {
-        if (!confirm('삭제하겠는가?')) return;
-        try {
-          const docRef = db.collection('photos').doc(id);
-          const doc = await docRef.get();
-          if (doc.exists) {
-            const { origPath, thumbPath } = doc.data();
-            if (origPath) await storage.ref(origPath).delete();
-            if (thumbPath) await storage.ref(thumbPath).delete();
-          }
-          await docRef.delete();
-        } catch (e) { alert('파일 삭제 중 오류 발생 (이미 삭제되었을 수 있음): ' + e.message); }
-      };
-
-      const addReview = (content) => { if (isFirebaseConfigured && db) db.collection('reviews').add({ content, author: user.name, authorId: user.name, createdAt: new Date().toISOString() }); };
-      const editReview = (id, content) => { if (isFirebaseConfigured && db) db.collection('reviews').doc(id).update({ content }); };
-      const deleteReview = (id) => { if (confirm('삭제하겠는가?') && isFirebaseConfigured && db) db.collection('reviews').doc(id).delete(); };
-
-      const handleBgUpload = async (e) => {
-        const file = e.target.files[0];
-        if(!file) return;
-        if (!checkFileSize(file)) {
-            e.target.value = '';
-            return; 
-        }
-
-        setIsBgUploading(true);
-        if (isFirebaseConfigured && storage && db) {
-          const fileRef = storage.ref(`system/bg_${Date.now()}_${file.name}`);
-          try {
-             const snapshot = await fileRef.put(file);
-             const url = await snapshot.ref.getDownloadURL();
-             const newSettings = { ...systemSettings, bgUrl: url };
-             db.collection('system').doc('settings').set(newSettings, {merge:true});
-             setSystemSettings(newSettings);
-          } catch(err) {
-             alert('배경화면 업데이트 실패: ' + err.message);
-          }
-        }
-        setIsBgUploading(false);
-      };
-
       const copyInviteLink = () => {
         const shareUrl = window.location.href.split('?')[0].split('#')[0]; 
         navigator.clipboard.writeText(shareUrl)
@@ -405,18 +345,20 @@
           .catch(() => alert('링크 복사에 실패했다.'));
       };
 
+      const sortedScheduleDates = Object.keys(schedules.reduce((acc, curr) => {
+        const d = (curr.date || '').substring(0, 10);
+        if (!acc[d]) acc[d] = [];
+        acc[d].push(curr);
+        return acc;
+      }, {})).sort();
+
       const groupedSchedules = schedules.reduce((acc, curr) => {
-        const dateOnly = (curr.date || '').substring(0, 10);
-        if (!acc[dateOnly]) acc[dateOnly] = [];
-        acc[dateOnly].push(curr);
+        const d = (curr.date || '').substring(0, 10);
+        if (!acc[d]) acc[d] = [];
+        acc[d].push(curr);
         return acc;
       }, {});
-      
-      const sortedScheduleDates = Object.keys(groupedSchedules).sort();
-      
-      sortedScheduleDates.forEach(dateKey => {
-        groupedSchedules[dateKey].sort((a, b) => a.startTime.localeCompare(b.startTime));
-      });
+      Object.keys(groupedSchedules).forEach(k => groupedSchedules[k].sort((a,b) => a.startTime.localeCompare(b.startTime)));
 
       if (!user) {
         return (
@@ -424,27 +366,24 @@
             <div className="w-full max-w-md bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl p-6 sm:p-8 space-y-6">
               <div className="text-center space-y-2">
                 <div className="inline-flex p-3 bg-sky-100 text-sky-600 rounded-full mb-2"><Icon name="plane" size={32} /></div>
-                <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">{systemSettings.title}</h1>
-                <p className="text-sm text-slate-500">{systemSettings.description}</p>
+                <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">2026 Global Welfare Overseas Training</h1>
               </div>
-              <div className="flex bg-slate-100 p-1 rounded-xl">
-                <button type="button" className={`flex-1 py-2 text-sm font-semibold rounded-lg ${!isAdminLogin ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500'}`} onClick={() => setIsAdminLogin(false)}>참여자</button>
-                <button type="button" className={`flex-1 py-2 text-sm font-semibold rounded-lg ${isAdminLogin ? 'bg-white text-sky-600 shadow-sm' : 'text-slate-500'}`} onClick={() => setIsAdminLogin(true)}>관리자</button>
-              </div>
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">{isAdminLogin ? '관리자 ID' : '이름'}</label>
-                  <input type="text" required placeholder={isAdminLogin ? 'admin818' : '예: 이기명'} value={loginName} onChange={(e) => setLoginName(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500" />
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                const name = e.target.name.value.trim();
+                const pw = e.target.pw.value.trim();
+                if(!name || !pw) { alert('입력하라.'); return; }
+                let u = (isAdminLogin || name === 'admin818') ? { name: 'admin818', role: 'admin', isAdmin: true } : { name, role: 'user', isAdmin: false };
+                if(u.isAdmin && pw !== '1234') { alert('비밀번호 오류'); return; }
+                setUser(u); localStorage.setItem('training_user', JSON.stringify(u));
+              }} className="space-y-4">
+                <div className="flex bg-slate-100 p-1 rounded-xl mb-4">
+                  <button type="button" className={`flex-1 py-2 text-sm font-semibold rounded-lg ${!isAdminLogin?'bg-white text-sky-600 shadow-sm':'text-slate-500'}`} onClick={()=>setIsAdminLogin(false)}>참여자</button>
+                  <button type="button" className={`flex-1 py-2 text-sm font-semibold rounded-lg ${isAdminLogin?'bg-white text-sky-600 shadow-sm':'text-slate-500'}`} onClick={()=>setIsAdminLogin(true)}>관리자</button>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">비밀번호</label>
-                  <input type="password" required placeholder="••••••••" value={loginPw} onChange={(e) => setLoginPw(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500" />
-                </div>
-                <label className="flex items-center space-x-2 text-sm text-slate-600 cursor-pointer">
-                  <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} className="w-4 h-4 text-sky-600 rounded" />
-                  <span>로그인 상태 유지</span>
-                </label>
-                <button type="submit" className="w-full py-3.5 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 text-white font-bold rounded-xl shadow-lg">접속하기</button>
+                <input name="name" required placeholder={isAdminLogin?'관리자 ID':'이름'} className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm" />
+                <input name="pw" type="password" required placeholder="비밀번호" className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm" />
+                <button type="submit" className="w-full py-3.5 bg-sky-500 text-white font-bold rounded-xl shadow-lg text-sm">접속하기</button>
               </form>
             </div>
           </div>
@@ -458,34 +397,30 @@
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 to-emerald-400 flex items-center justify-center text-white shadow-md"><Icon name="compass" size={22} /></div>
                 <div>
-                  <h1 className="text-base sm:text-lg font-bold text-slate-800 leading-tight truncate max-w-[200px]">{systemSettings.title}</h1>
-                  <span className="inline-flex items-center text-xs text-slate-500">({user.isAdmin ? '관리자' : '참여자'} 접속 중)</span>
+                  <h1 className="text-base font-bold text-slate-800">2026 Global Welfare Overseas Training</h1>
+                  <span className="text-xs text-slate-500">({user.isAdmin ? '관리자' : '참여자'} 접속 중)</span>
                 </div>
               </div>
               <div className="flex space-x-2">
                 {user.isAdmin && <button onClick={copyInviteLink} className="p-2 text-sky-600 hover:bg-sky-50 rounded-lg"><Icon name="share-2" size={20} /></button>}
-                <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg"><Icon name="log-out" size={20} /></button>
+                <button onClick={() => { setUser(null); localStorage.removeItem('training_user'); }} className="p-2 text-slate-400 hover:text-rose-600 rounded-lg"><Icon name="log-out" size={20} /></button>
               </div>
             </div>
           </header>
 
-          <div className="relative h-36 sm:h-48 w-full bg-slate-800 overflow-hidden">
-            <img src={systemSettings.bgUrl} alt="Cover" className="w-full h-full object-cover opacity-70" />
-            <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 to-transparent flex items-end p-4">
-              <div className="text-white"><p className="text-sm font-medium">{systemSettings.description}</p></div>
-            </div>
-          </div>
-
           <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 space-y-6">
-            
             {activeTab === 'schedule' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Icon name="calendar" size={22} className="text-sky-500" /> 연수 일정</h2>
-                  <div className="flex space-x-2">
-                    <label className="cursor-pointer px-3 py-2 bg-emerald-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5"><Icon name="file-spreadsheet" size={16} />엑셀 업로드<input type="file" accept=".xlsx, .csv" onChange={handleExcelUpload} className="hidden" /></label>
-                    {user.isAdmin && <button onClick={() => setModalState({ type: 'add_schedule' })} className="px-3 py-2 bg-sky-500 text-white text-xs font-bold rounded-xl flex items-center gap-1"><Icon name="plus" size={16} />추가</button>}
-                  </div>
+                  {user.isAdmin && (
+                    <div className="flex space-x-2">
+                      <label className="cursor-pointer px-3 py-2 bg-emerald-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5">
+                        <Icon name="file-spreadsheet" size={16} />엑셀 업로드<input type="file" accept=".xlsx, .csv" onChange={handleExcelUpload} className="hidden" />
+                      </label>
+                      <button onClick={() => setModalState({ type: 'add_schedule' })} className="px-3 py-2 bg-sky-500 text-white text-xs font-bold rounded-xl flex items-center gap-1"><Icon name="plus" size={16} />추가</button>
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-6">
                   {sortedScheduleDates.map(dateKey => (
@@ -495,7 +430,7 @@
                       </div>
                       <div className="space-y-3 pl-2 sm:pl-4 border-l-2 border-slate-200 ml-2">
                         {groupedSchedules[dateKey].map((item) => (
-                          <div key={item.id} className="bg-white rounded-2xl p-4 border shadow-sm flex flex-col sm:flex-row justify-between gap-4 relative">
+                          <div key={item.id} className="bg-white rounded-2xl p-4 border shadow-sm flex flex-col sm:flex-row justify-between gap-4">
                             <div className="flex space-x-4">
                               <div className="px-3 py-2 bg-sky-50 text-sky-600 rounded-xl text-center min-w-[85px] flex flex-col justify-center">
                                 <p className="text-base font-extrabold">{item.startTime}</p>
@@ -507,7 +442,7 @@
                               </div>
                             </div>
                             {user.isAdmin && (
-                              <div className="flex space-x-2 self-end sm:self-center absolute top-2 right-2 sm:relative sm:top-0 sm:right-0 bg-white rounded-lg p-1">
+                              <div className="flex space-x-2 self-end sm:self-center bg-white rounded-lg p-1 mt-2 sm:mt-0">
                                 <button onClick={() => setModalState({ type: 'edit_schedule', data: item })} className="p-1.5 text-slate-400 hover:text-sky-500"><Icon name="edit" size={16} /></button>
                                 <button onClick={() => deleteSchedule(item.id)} className="p-1.5 text-slate-400 hover:text-rose-500"><Icon name="trash-2" size={16} /></button>
                               </div>
@@ -538,7 +473,7 @@
                         {(user.isAdmin || user.name === n.author) && <button onClick={() => deleteNotice(n.id)} className="text-slate-300 hover:text-rose-500 p-1"><Icon name="trash-2" size={18} /></button>}
                       </div>
                       <p className="text-sm text-slate-600 whitespace-pre-line">{renderTextWithLinks(n.content)}</p>
-                      {n.fileName && <a href={n.fileUrl || '#'} download target="_blank" className="inline-flex items-center px-3 py-2 bg-slate-50 border rounded-xl text-xs font-medium text-slate-700 space-x-2"><Icon name="paperclip" size={14} /><span>{n.fileName}</span></a>}
+                      {n.fileName && <button onClick={() => forceDownload(n.fileUrl, n.fileName)} className="inline-flex items-center px-3 py-2 bg-slate-50 border rounded-xl text-xs font-medium text-slate-700 space-x-2"><Icon name="download" size={14} /><span>{n.fileName} 다운로드</span></button>}
                     </div>
                   ))}
                 </div>
@@ -596,15 +531,25 @@
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {photos.map((p) => (
-                    <div key={p.id} className="bg-white rounded-2xl overflow-hidden border shadow-sm flex flex-col">
+                    <div key={p.id} className="bg-white rounded-2xl overflow-hidden border shadow-sm flex flex-col relative group">
                       <div className="aspect-square bg-slate-100 cursor-pointer" onClick={() => setLightboxImg(p)}>
                         <img src={p.url} className="w-full h-full object-cover" />
                       </div>
                       <div className="p-3 flex-1 flex flex-col justify-between">
                         <p className="text-xs font-medium text-slate-700 line-clamp-2">{renderTextWithLinks(p.caption)}</p>
-                        <div className="flex justify-between pt-2 text-[11px] text-slate-400 mt-2">
-                          <span>{p.author}</span>
-                          {(user.isAdmin || user.name === p.author) && <button onClick={() => deletePhoto(p.id)} className="hover:text-rose-500"><Icon name="trash-2" size={14} /></button>}
+                        <div className="flex justify-between items-center pt-2 mt-2 border-t border-slate-50">
+                          <span className="text-[11px] text-slate-400">{p.author}</span>
+                          <div className="flex space-x-3">
+                            {/* 퀵 다운로드 버튼 추가 */}
+                            <button onClick={(e) => { e.stopPropagation(); forceDownload(p.originalUrl || p.url, `photo_${Date.now()}.jpg`); }} className="text-sky-500 hover:text-sky-700">
+                              <Icon name="download" size={16} />
+                            </button>
+                            {(user.isAdmin || user.name === p.author) && (
+                              <button onClick={() => deletePhoto(p.id)} className="text-slate-300 hover:text-rose-500">
+                                <Icon name="trash-2" size={16} />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -617,7 +562,7 @@
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Icon name="heart" size={22} className="text-sky-500" /> 소감</h2>
-                  <button onClick={() => setModalState({ type: 'add_review' })} className="px-3 py-2 bg-sky-500 text-white text-xs font-bold rounded-xl"><Icon name="pen-tool" size={16} /> 남기기</button>
+                  <button onClick={() => setModalState({ type: 'add_review' })} className="px-3 py-2 bg-sky-500 text-white text-xs font-bold rounded-xl">남기기</button>
                 </div>
                 <div className="space-y-3">
                   {reviews.map((r) => (
@@ -640,43 +585,6 @@
                 </div>
               </div>
             )}
-
-            {activeTab === 'settings' && user.isAdmin && (
-              <div className="space-y-6">
-                <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Icon name="settings" size={22} className="text-sky-500" /> 설정</h2>
-                
-                <div className="bg-white rounded-2xl p-5 border shadow-sm space-y-4">
-                  <h3 className="text-base font-bold text-slate-800 border-b pb-2">기본 정보 변경</h3>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1">제목</label>
-                      <input type="text" value={systemSettings.title} onChange={(e) => setSystemSettings({ ...systemSettings, title: e.target.value })} className="w-full px-3 py-2 border rounded-xl text-sm" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1">소개</label>
-                      <input type="text" value={systemSettings.description} onChange={(e) => setSystemSettings({ ...systemSettings, description: e.target.value })} className="w-full px-3 py-2 border rounded-xl text-sm" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-600 mb-1 flex justify-between">배경 이미지 업로드 {isBgUploading && <span className="text-sky-500 animate-pulse">업로드 중...</span>}</label>
-                      <input type="file" accept="image/*" onChange={handleBgUpload} className="w-full px-3 py-2 border rounded-xl text-sm" />
-                    </div>
-                  </div>
-                </div>
-                <div className="bg-white rounded-2xl p-5 border shadow-sm space-y-4">
-                  <div className="flex justify-between items-center border-b pb-2">
-                    <h3 className="text-base font-bold text-slate-800">참여자 관리</h3>
-                  </div>
-                  <div className="divide-y max-h-60 overflow-y-auto">
-                    {participants.map((p) => (
-                      <div key={p.id} className="py-2.5 flex justify-between items-center text-xs">
-                        <div><span className="font-bold">{p.name}</span> <span className="text-slate-400 ml-2">최근: {p.lastLogin ? new Date(p.lastLogin).toLocaleDateString() : '-'}</span></div>
-                        {p.role !== 'admin' && <button onClick={() => setParticipants(prev => prev.filter(item => item.id !== p.id))} className="text-rose-500 font-bold hover:underline">삭제</button>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
           </main>
 
           {lightboxImg && (
@@ -685,8 +593,10 @@
                 <button onClick={() => setLightboxImg(null)} className="absolute -top-12 right-0 text-white p-2"><Icon name="x" size={28} /></button>
                 <img src={lightboxImg.originalUrl || lightboxImg.url} className="max-h-[75vh] w-auto rounded-xl" />
                 <div className="mt-4 text-center text-white space-y-2">
-                  <p>{renderTextWithLinks(lightboxImg.caption)}</p><p className="text-xs">작성자: {lightboxImg.author}</p>
-                  <button onClick={() => forceDownload(lightboxImg.originalUrl || lightboxImg.url, `training_photo_${Date.now()}.jpg`)} className="inline-flex items-center gap-1.5 px-4 py-2 bg-sky-500 text-white font-bold rounded-xl text-xs"><Icon name="download" size={16} /> 원본 다운로드</button>
+                  <p>{renderTextWithLinks(lightboxImg.caption)}</p>
+                  <button onClick={() => forceDownload(lightboxImg.originalUrl || lightboxImg.url, `training_photo_${Date.now()}.jpg`)} className="inline-flex items-center gap-1.5 px-4 py-2 bg-sky-500 text-white font-bold rounded-xl text-xs">
+                    <Icon name="download" size={16} /> 사진 앱에 저장하기
+                  </button>
                 </div>
               </div>
             </div>
@@ -696,97 +606,41 @@
             <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
                 <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-bold text-slate-800">
-                    {modalState.type.includes('edit_') ? '수정하기' : '등록하기'}
-                  </h3>
+                  <h3 className="text-lg font-bold text-slate-800">등록하기</h3>
                   <button onClick={() => { setSelectedFiles([]); setModalState({ type: null }); }}><Icon name="x" size={20} /></button>
                 </div>
                 
-                {modalState.type === 'add_notice' ? (
-                   <form onSubmit={submitNotice} className="space-y-3">
-                      <input name="title" placeholder="제목" required className="w-full p-3 border rounded-xl text-sm" />
-                      <textarea name="content" placeholder="공지 내용 (웹 주소를 입력하면 자동으로 링크로 변환된다)" required rows={4} className="w-full p-3 border rounded-xl text-sm" />
-                      <label className="block text-xs font-bold text-slate-600 mb-1">첨부파일 (5MB 이하 문서/이미지)</label>
-                      <input name="noticeFile" type="file" className="w-full p-2 border rounded-xl text-sm" />
-                      {isUploading && <p className="text-xs text-sky-500 animate-pulse pt-2">서버에 파일을 업로드 중이다...</p>}
-                      <div className="flex space-x-2 pt-2">
-                        <button type="button" onClick={() => { setSelectedFiles([]); setModalState({ type: null }); }} className="flex-1 py-3 bg-slate-100 font-bold rounded-xl text-xs">취소</button>
-                        <button type="submit" disabled={isUploading} className="flex-1 py-3 bg-sky-500 text-white font-bold rounded-xl text-xs">확인</button>
-                      </div>
-                   </form>
-                ) : (
-                  <form onSubmit={(e) => {
-                    e.preventDefault();
-                    const form = e.target;
-                    
-                    if (modalState.type === 'add_schedule') {
-                      const rawDate = form.date.value;
-                      const finalDateStr = rawDate + getDayOfWeek(rawDate);
-                      addSchedule({ date: finalDateStr, startTime: form.startTime.value, endTime: form.endTime.value, location: form.location.value, content: form.content.value, color: form.color.value });
-                    } else if (modalState.type === 'edit_schedule') {
-                      const rawDate = form.date.value;
-                      const finalDateStr = rawDate + getDayOfWeek(rawDate);
-                      editSchedule(modalState.data.id, { date: finalDateStr, startTime: form.startTime.value, endTime: form.endTime.value, location: form.location.value, content: form.content.value, color: form.color.value });
-                    } else if (modalState.type === 'add_board') {
-                      addBoard(form.content.value);
-                    } else if (modalState.type === 'edit_board') {
-                      editBoard(modalState.data.id, form.content.value);
-                    } else if (modalState.type === 'upload_photo') {
-                      uploadPhotos(selectedFiles, form.caption.value); return;
-                    } else if (modalState.type === 'add_review') {
-                      addReview(form.content.value);
-                    } else if (modalState.type === 'edit_review') {
-                      editReview(modalState.data.id, form.content.value);
-                    }
-                    
-                    if(modalState.type !== 'upload_photo') { setSelectedFiles([]); setModalState({ type: null }); }
-                  }} className="space-y-3">
-                    
-                    {(modalState.type === 'add_schedule' || modalState.type === 'edit_schedule') && (
-                      <>
-                        <input name="date" type="date" required defaultValue={modalState.data?.date?.substring(0, 10)} className="w-full p-3 border rounded-xl text-sm" />
-                        <div className="flex gap-2">
-                          <input name="startTime" type="time" required defaultValue={modalState.data?.startTime} className="w-full p-3 border rounded-xl text-sm" />
-                          <span className="flex items-center text-slate-400">~</span>
-                          <input name="endTime" type="time" defaultValue={modalState.data?.endTime} className="w-full p-3 border rounded-xl text-sm" />
-                        </div>
-                        <input name="location" placeholder="장소" required defaultValue={modalState.data?.location} className="w-full p-3 border rounded-xl text-sm" />
-                        <textarea name="content" placeholder="활동 내용" required rows={3} defaultValue={modalState.data?.content} className="w-full p-3 border rounded-xl text-sm whitespace-pre-wrap" />
-                        <div className="flex items-center space-x-2 pt-1">
-                          <label className="text-xs font-bold text-slate-600">글자 색상 지정:</label>
-                          <input type="color" name="color" defaultValue={modalState.data?.color || "#1e293b"} className="h-8 w-12 cursor-pointer border rounded" />
-                        </div>
-                      </>
-                    )}
-
-                    {(modalState.type === 'add_board' || modalState.type === 'edit_board') && (
-                      <textarea name="content" placeholder="내용을 작성하라... (웹 주소를 입력하면 자동으로 링크로 변환된다)" required rows={4} defaultValue={modalState.data?.content} className="w-full p-3 border rounded-xl text-sm" />
-                    )}
-                    
-                    {modalState.type === 'upload_photo' && (
-                      <>
-                        <input name="photoFiles" type="file" accept="image/*" multiple required onChange={(e) => setSelectedFiles(e.target.files)} className="w-full p-2 border rounded-xl text-sm" />
-                        {selectedFiles.length > 0 && (
-                          <div className="flex gap-2 overflow-x-auto py-2">
-                            {Array.from(selectedFiles).map((file, idx) => (
-                              <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden border shrink-0 bg-slate-100">
-                                <img src={URL.createObjectURL(file)} className="w-full h-full object-cover" />
-                              </div>
-                            ))}
+                {modalState.type === 'upload_photo' ? (
+                  <form onSubmit={(e) => { e.preventDefault(); uploadPhotos(selectedFiles, e.target.caption.value); }} className="space-y-3">
+                    <input type="file" accept="image/*" multiple required onChange={(e) => setSelectedFiles(e.target.files)} className="w-full p-2 border rounded-xl text-sm" />
+                    {selectedFiles.length > 0 && (
+                      <div className="flex gap-2 overflow-x-auto py-2">
+                        {Array.from(selectedFiles).map((file, idx) => (
+                          <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden border shrink-0 bg-slate-100">
+                            <img src={URL.createObjectURL(file)} className="w-full h-full object-cover" />
                           </div>
-                        )}
-                        <input name="caption" placeholder="사진 캡션 (설명)" className="w-full p-3 border rounded-xl text-sm" />
-                        {isUploading && <p className="text-xs text-sky-500 animate-pulse pt-2">선택한 사진들을 최적화하여 일괄 업로드 중이다...</p>}
-                      </>
+                        ))}
+                      </div>
                     )}
-
-                    {(modalState.type === 'add_review' || modalState.type === 'edit_review') && (
-                      <textarea name="content" placeholder="소감이나 피드백..." required rows={4} defaultValue={modalState.data?.content} className="w-full p-3 border rounded-xl text-sm" />
-                    )}
-
+                    <input name="caption" placeholder="사진 캡션 (설명)" className="w-full p-3 border rounded-xl text-sm" />
+                    {isUploading && <p className="text-xs text-sky-500 animate-pulse pt-2">선택한 사진들을 최적화하여 일괄 업로드 중이다...</p>}
                     <div className="flex space-x-2 pt-2">
                       <button type="button" onClick={() => { setSelectedFiles([]); setModalState({ type: null }); }} className="flex-1 py-3 bg-slate-100 font-bold rounded-xl text-xs">취소</button>
                       <button type="submit" disabled={isUploading} className="flex-1 py-3 bg-sky-500 text-white font-bold rounded-xl text-xs">확인</button>
+                    </div>
+                  </form>
+                ) : (
+                  <form onSubmit={(e) => {
+                    e.preventDefault();
+                    const val = e.target.content.value;
+                    if(modalState.type === 'add_board') db.collection('boards').add({ content: val, author: user.name, createdAt: new Date().toISOString(), comments:[] });
+                    if(modalState.type === 'add_review') db.collection('reviews').add({ content: val, author: user.name, createdAt: new Date().toISOString() });
+                    setModalState({ type: null });
+                  }} className="space-y-3">
+                    <textarea name="content" placeholder="내용을 작성하라..." required rows={4} className="w-full p-3 border rounded-xl text-sm" />
+                    <div className="flex space-x-2 pt-2">
+                      <button type="button" onClick={() => setModalState({ type: null })} className="flex-1 py-3 bg-slate-100 font-bold rounded-xl text-xs">취소</button>
+                      <button type="submit" className="flex-1 py-3 bg-sky-500 text-white font-bold rounded-xl text-xs">확인</button>
                     </div>
                   </form>
                 )}
@@ -795,8 +649,8 @@
           )}
 
           <nav className="fixed bottom-0 inset-x-0 bg-white/95 border-t z-40 px-2 py-2">
-            <div className="max-w-md mx-auto grid grid-cols-6 gap-1 text-center">
-              {[{ id: 'schedule', icon: 'calendar', l:'일정' }, { id: 'notice', icon: 'bell', l:'정보' }, { id: 'board', icon: 'message-square', l:'게시판' }, { id: 'gallery', icon: 'image', l:'사진' }, { id: 'review', icon: 'heart', l:'소감' }, ...(user.isAdmin ? [{ id: 'settings', icon: 'settings', l:'설정' }] : [])].map(t => (
+            <div className="max-w-md mx-auto grid grid-cols-5 gap-1 text-center">
+              {[{ id: 'schedule', icon: 'calendar', l:'일정' }, { id: 'notice', icon: 'bell', l:'정보' }, { id: 'board', icon: 'message-square', l:'게시판' }, { id: 'gallery', icon: 'image', l:'사진' }, { id: 'review', icon: 'heart', l:'소감' }].map(t => (
                 <button key={t.id} onClick={() => setActiveTab(t.id)} className={`flex flex-col items-center py-1.5 px-1 rounded-xl ${activeTab === t.id ? 'text-sky-600 bg-sky-50' : 'text-slate-400'}`}>
                   <Icon name={t.icon} size={18} /><span className="text-[10px] mt-1">{t.l}</span>
                 </button>
