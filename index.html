@@ -56,7 +56,7 @@
 
     const Icon = ({ name, size = 20, className = "" }) => {
       useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name]);
-      return <i data-lucide={name} style={{ width: size, height: size, display: 'inline-block' }} class={className}></i>;
+      return <i data-lucide={name} style={{ width: size, height: size, display: 'inline-block' }} className={className}></i>;
     };
 
     const renderTextWithLinks = (text) => {
@@ -78,40 +78,6 @@
       return isNaN(d) ? '' : `(${days[d.getDay()]})`;
     };
 
-    // 모바일 네이티브 공유 API 및 Blob 강제 다운로드 로직
-    const forceDownload = async (fileUrl, fileName) => {
-      try {
-        const response = await fetch(fileUrl);
-        const blob = await response.blob();
-        const fileNameStr = fileName || `training_photo_${Date.now()}.jpg`;
-        const file = new File([blob], fileNameStr, { type: blob.type || 'image/jpeg' });
-
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          try {
-            await navigator.share({
-              files: [file],
-              title: '사진 저장'
-            });
-            return; 
-          } catch (shareErr) {
-            console.log('공유 취소됨');
-            return; 
-          }
-        }
-
-        const blobUrl = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = fileNameStr;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(blobUrl);
-      } catch (err) {
-        window.open(fileUrl, '_blank');
-      }
-    };
-
     function GlobalTrainingApp() {
       const [user, setUser] = useState(() => {
         const saved = localStorage.getItem('training_user');
@@ -128,8 +94,10 @@
       const [isBgUploading, setIsBgUploading] = useState(false);
       const [selectedFiles, setSelectedFiles] = useState([]);
       const [lightboxImg, setLightboxImg] = useState(null);
+      
+      // 다운로드 진행 상태 추적 (어떤 파일이 다운로드 중인지 ID 저장)
+      const [downloadingId, setDownloadingId] = useState(null);
 
-      // 전체 상태 복구
       const [systemSettings, setSystemSettings] = useState({
         title: "2026 Global Welfare Overseas Training",
         description: "글로벌 사회복지 현장 탐방 및 네트워크 구축 연수",
@@ -189,7 +157,41 @@
 
       const handleLogout = () => { setUser(null); localStorage.removeItem('training_user'); };
 
-      // 다중 사진 업로드
+      // 로딩 스피너가 포함된 개선된 다운로드 함수
+      const handleDownload = async (targetId, fileUrl, fileName) => {
+        if (downloadingId) return; // 중복 클릭 방지
+        setDownloadingId(targetId); // 로딩 시작
+        
+        try {
+          const response = await fetch(fileUrl);
+          const blob = await response.blob();
+          const fileNameStr = fileName || `training_photo_${Date.now()}.jpg`;
+          const file = new File([blob], fileNameStr, { type: blob.type || 'image/jpeg' });
+
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            try {
+              await navigator.share({ files: [file], title: '파일 저장' });
+            } catch (shareErr) {
+              console.log('공유 취소됨');
+            }
+          } else {
+            const blobUrl = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.download = fileNameStr;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(blobUrl);
+          }
+        } catch (err) {
+          // 보안/CORS 문제로 가져오지 못한 경우 새 창 열기 (Fallback)
+          window.open(fileUrl, '_blank');
+        } finally {
+          setDownloadingId(null); // 로딩 종료
+        }
+      };
+
       const uploadPhotos = async (files, caption) => {
         if (!files || files.length === 0) return;
         setIsUploading(true);
@@ -228,7 +230,6 @@
         setIsUploading(false); setSelectedFiles([]); setModalState({ type: null });
       };
 
-      // 스토리지 파일 연동 삭제 로직 (사진)
       const deletePhoto = async (id) => {
         if (!confirm('삭제하겠는가?')) return;
         try {
@@ -236,30 +237,29 @@
           const doc = await docRef.get();
           if (doc.exists) {
             const { origPath, thumbPath } = doc.data();
-            if (origPath) await storage.ref(origPath).delete();
-            if (thumbPath) await storage.ref(thumbPath).delete();
+            if (origPath) await storage.ref(origPath).delete().catch(()=>console.log('이미지 없음'));
+            if (thumbPath) await storage.ref(thumbPath).delete().catch(()=>console.log('썸네일 없음'));
           }
           await docRef.delete();
-        } catch (e) { alert('파일 삭제 오류 (이미 삭제되었을 수 있음): ' + e.message); }
+        } catch (e) { alert('삭제 오류: ' + e.message); }
       };
 
-      // 스토리지 파일 연동 삭제 로직 (공지사항)
       const deleteNotice = async (id) => {
         if (!confirm('삭제하겠는가?')) return;
         try {
           const docRef = db.collection('notices').doc(id);
           const doc = await docRef.get();
           if (doc.exists && doc.data().storagePath) {
-            await storage.ref(doc.data().storagePath).delete();
+            await storage.ref(doc.data().storagePath).delete().catch(()=>console.log('파일 없음'));
           }
           await docRef.delete();
-        } catch (e) { alert('공지사항 삭제 오류: ' + e.message); }
+        } catch (e) { alert('삭제 오류: ' + e.message); }
       };
 
       const checkFileSize = (file) => {
         const maxSize = 5 * 1024 * 1024; 
         if (file.size > maxSize) {
-          alert(`파일 용량이 너무 크다. (현재: ${(file.size / 1024 / 1024).toFixed(1)}MB)\n5MB 이하의 파일만 업로드할 수 있다.`);
+          alert(`용량이 너무 크다. 5MB 이하만 업로드 가능.`);
           return false;
         }
         return true;
@@ -282,24 +282,20 @@
 
         if (file) {
           if (!checkFileSize(file)) return; 
-          
           setIsUploading(true);
           fileName = file.name;
           if (isFirebaseConfigured && storage) {
             storagePath = `notices/${Date.now()}_${file.name}`;
-            const fileRef = storage.ref(storagePath);
             try {
-              const snapshot = await fileRef.put(file);
+              const snapshot = await storage.ref(storagePath).put(file);
               fileUrl = await snapshot.ref.getDownloadURL();
             } catch (err) {
-              alert('스토리지 업로드 거부됨.\n에러: ' + err.message);
+              alert('스토리지 에러: ' + err.message);
               setIsUploading(false); return;
             }
           }
         }
-
-        const payload = { title, content, fileName, fileUrl, storagePath, author: user.name, createdAt: new Date().toISOString() };
-        if (isFirebaseConfigured && db) await db.collection('notices').add(payload);
+        if (isFirebaseConfigured && db) await db.collection('notices').add({ title, content, fileName, fileUrl, storagePath, author: user.name, createdAt: new Date().toISOString() });
         setIsUploading(false); setModalState({ type: null });
       };
 
@@ -339,7 +335,7 @@
             const ws = wb.Sheets[wsName];
             const data = XLSX.utils.sheet_to_json(ws, { raw: false, dateNF: 'yyyy-mm-dd' });
 
-            if (data.length === 0) { alert('엑셀 데이터 오류.'); return; }
+            if (data.length === 0) { alert('데이터 없음.'); return; }
 
             const parsedSchedules = data.map((row) => {
               const dateKey = Object.keys(row).find(k => k.includes('날짜') || k.toLowerCase().includes('date')) || Object.keys(row)[0];
@@ -364,15 +360,15 @@
                 if(parts.length >= 2) { startTime = parts[0].trim(); endTime = parts[1].trim(); }
               }
 
-              return { date: finalDateStr, startTime, endTime, location: row[locationKey] ? String(row[locationKey]).trim() : '장소 미정', content: row[contentKey] ? String(row[contentKey]) : '일정 내용 없음', color: '#1e293b', createdAt: new Date().toISOString() };
+              return { date: finalDateStr, startTime, endTime, location: row[locationKey] ? String(row[locationKey]).trim() : '미정', content: row[contentKey] ? String(row[contentKey]) : '내용 없음', color: '#1e293b', createdAt: new Date().toISOString() };
             });
             
             if (isFirebaseConfigured && db) {
               const batch = db.batch();
               parsedSchedules.forEach(item => { batch.set(db.collection('schedules').doc(), item); });
-              batch.commit().then(() => alert(`총 ${parsedSchedules.length}건 일정 추가.`));
+              batch.commit().then(() => alert(`총 ${parsedSchedules.length}건 추가됨.`));
             }
-          } catch (err) { alert('파싱 오류: ' + err.message); }
+          } catch (err) { alert('오류: ' + err.message); }
         };
         reader.readAsBinaryString(file);
       };
@@ -390,7 +386,7 @@
              const newSettings = { ...systemSettings, bgUrl: url };
              db.collection('system').doc('settings').set(newSettings, {merge:true});
              setSystemSettings(newSettings);
-          } catch(err) { alert('배경화면 업데이트 실패: ' + err.message); }
+          } catch(err) { alert('업데이트 실패: ' + err.message); }
         }
         setIsBgUploading(false);
       };
@@ -407,7 +403,7 @@
         return acc;
       }, {});
       const sortedScheduleDates = Object.keys(groupedSchedules).sort();
-      sortedScheduleDates.forEach(k => groupedSchedules[k].sort((a,b) => a.startTime.localeCompare(b.startTime)));
+      sortedScheduleDates.forEach(k => groupedSchedules[k].sort((a,b) => (a.startTime || '').localeCompare(b.startTime || '')));
 
       if (!user) {
         return (
@@ -415,8 +411,8 @@
             <div className="w-full max-w-md bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl p-6 sm:p-8 space-y-6">
               <div className="text-center space-y-2">
                 <div className="inline-flex p-3 bg-sky-100 text-sky-600 rounded-full mb-2"><Icon name="plane" size={32} /></div>
-                <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">{systemSettings.title}</h1>
-                <p className="text-sm text-slate-500">{systemSettings.description}</p>
+                <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">{systemSettings?.title || "로딩 중..."}</h1>
+                <p className="text-sm text-slate-500">{systemSettings?.description || ""}</p>
               </div>
               <div className="flex bg-slate-100 p-1 rounded-xl mb-4">
                 <button type="button" className={`flex-1 py-2 text-sm font-semibold rounded-lg ${!isAdminLogin?'bg-white text-sky-600 shadow-sm':'text-slate-500'}`} onClick={()=>setIsAdminLogin(false)}>참여자</button>
@@ -443,7 +439,7 @@
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 to-emerald-400 flex items-center justify-center text-white shadow-md"><Icon name="compass" size={22} /></div>
                 <div>
-                  <h1 className="text-base font-bold text-slate-800">{systemSettings.title}</h1>
+                  <h1 className="text-base font-bold text-slate-800">{systemSettings?.title}</h1>
                   <span className="text-xs text-slate-500">({user.isAdmin ? '관리자' : '참여자'} 접속 중)</span>
                 </div>
               </div>
@@ -455,9 +451,9 @@
           </header>
 
           <div className="relative h-36 sm:h-48 w-full bg-slate-800 overflow-hidden">
-            <img src={systemSettings.bgUrl} alt="Cover" className="w-full h-full object-cover opacity-70" />
+            <img src={systemSettings?.bgUrl} alt="Cover" className="w-full h-full object-cover opacity-70" />
             <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 to-transparent flex items-end p-4">
-              <div className="text-white"><p className="text-sm font-medium">{systemSettings.description}</p></div>
+              <div className="text-white"><p className="text-sm font-medium">{systemSettings?.description}</p></div>
             </div>
           </div>
 
@@ -526,7 +522,12 @@
                         {(user.isAdmin || user.name === n.author) && <button onClick={() => deleteNotice(n.id)} className="text-slate-300 hover:text-rose-500 p-1"><Icon name="trash-2" size={18} /></button>}
                       </div>
                       <p className="text-sm text-slate-600 whitespace-pre-line">{renderTextWithLinks(n.content)}</p>
-                      {n.fileName && <button onClick={() => forceDownload(n.fileUrl, n.fileName)} className="inline-flex items-center px-3 py-2 bg-slate-50 border rounded-xl text-xs font-medium text-slate-700 space-x-2"><Icon name="download" size={14} /><span>{n.fileName} 다운로드</span></button>}
+                      {n.fileName && (
+                        <button onClick={() => handleDownload(n.id, n.fileUrl, n.fileName)} className="inline-flex items-center px-3 py-2 bg-slate-50 border rounded-xl text-xs font-medium text-slate-700 space-x-2">
+                          {downloadingId === n.id ? <Icon name="loader" className="animate-spin" size={14} /> : <Icon name="download" size={14} />}
+                          <span>{n.fileName} 다운로드</span>
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -592,9 +593,10 @@
                         <p className="text-xs font-medium text-slate-700 line-clamp-2">{renderTextWithLinks(p.caption)}</p>
                         <div className="flex justify-between items-center pt-2 mt-2 border-t border-slate-50">
                           <span className="text-[11px] text-slate-400">{p.author}</span>
-                          <div className="flex space-x-3">
-                            <button onClick={(e) => { e.stopPropagation(); forceDownload(p.originalUrl || p.url, `photo_${Date.now()}.jpg`); }} className="text-sky-500 hover:text-sky-700">
-                              <Icon name="download" size={16} />
+                          <div className="flex space-x-3 items-center">
+                            {/* 퀵 다운로드: 가벼운 썸네일(p.url) 우선 다운로드로 속도 극대화 */}
+                            <button onClick={(e) => { e.stopPropagation(); handleDownload(p.id, p.url, `photo_${Date.now()}.jpg`); }} className="text-sky-500 hover:text-sky-700 disabled:opacity-50" disabled={downloadingId === p.id}>
+                              {downloadingId === p.id ? <Icon name="loader" className="animate-spin" size={16} /> : <Icon name="download" size={16} />}
                             </button>
                             {(user.isAdmin || user.name === p.author) && (
                               <button onClick={() => deletePhoto(p.id)} className="text-slate-300 hover:text-rose-500">
@@ -647,11 +649,11 @@
                   <div className="space-y-3">
                     <div>
                       <label className="block text-xs font-bold text-slate-600 mb-1">제목</label>
-                      <input type="text" value={systemSettings.title} onChange={(e) => setSystemSettings({ ...systemSettings, title: e.target.value })} className="w-full px-3 py-2 border rounded-xl text-sm" />
+                      <input type="text" value={systemSettings?.title || ""} onChange={(e) => setSystemSettings({ ...systemSettings, title: e.target.value })} className="w-full px-3 py-2 border rounded-xl text-sm" />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-600 mb-1">소개</label>
-                      <input type="text" value={systemSettings.description} onChange={(e) => setSystemSettings({ ...systemSettings, description: e.target.value })} className="w-full px-3 py-2 border rounded-xl text-sm" />
+                      <input type="text" value={systemSettings?.description || ""} onChange={(e) => setSystemSettings({ ...systemSettings, description: e.target.value })} className="w-full px-3 py-2 border rounded-xl text-sm" />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-600 mb-1 flex justify-between">배경 이미지 업로드 {isBgUploading && <span className="text-sky-500 animate-pulse">업로드 중...</span>}</label>
@@ -683,8 +685,10 @@
                 <img src={lightboxImg.originalUrl || lightboxImg.url} className="max-h-[75vh] w-auto rounded-xl" />
                 <div className="mt-4 text-center text-white space-y-2">
                   <p>{renderTextWithLinks(lightboxImg.caption)}</p>
-                  <button onClick={() => forceDownload(lightboxImg.originalUrl || lightboxImg.url, `training_photo_${Date.now()}.jpg`)} className="inline-flex items-center gap-1.5 px-4 py-2 bg-sky-500 text-white font-bold rounded-xl text-xs">
-                    <Icon name="download" size={16} /> 기기에 저장하기
+                  {/* 라이트박스 다운로드: 고품질 원본(originalUrl)을 다운로드하도록 설정 */}
+                  <button onClick={() => handleDownload('lightbox', lightboxImg.originalUrl || lightboxImg.url, `training_photo_orig_${Date.now()}.jpg`)} disabled={downloadingId === 'lightbox'} className="inline-flex items-center gap-1.5 px-4 py-2 bg-sky-500 text-white font-bold rounded-xl text-xs disabled:bg-slate-400">
+                    {downloadingId === 'lightbox' ? <Icon name="loader" className="animate-spin" size={16} /> : <Icon name="download" size={16} />} 
+                    {downloadingId === 'lightbox' ? '원본 로딩 중...' : '원본 기기에 저장하기'}
                   </button>
                 </div>
               </div>
@@ -775,7 +779,7 @@
                           </div>
                         )}
                         <input name="caption" placeholder="사진 캡션 (설명)" className="w-full p-3 border rounded-xl text-sm" />
-                        {isUploading && <p className="text-xs text-sky-500 animate-pulse pt-2">선택한 사진들을 일괄 업로드 중이다...</p>}
+                        {isUploading && <p className="text-xs text-sky-500 animate-pulse pt-2">선택한 사진들을 최적화하여 일괄 업로드 중이다...</p>}
                       </>
                     )}
 
