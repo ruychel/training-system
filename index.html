@@ -86,7 +86,7 @@
       const [loginName, setLoginName] = useState('');
       const [loginPw, setLoginPw] = useState('');
       const [rememberMe, setRememberMe] = useState(true);
-      const [isAdminLogin, setIsAdminLogin] = useState(false);
+      const [isAdminMode, setIsAdminMode] = useState(false); // 관리자 모드 상태
 
       const [activeTab, setActiveTab] = useState('schedule');
       const [modalState, setModalState] = useState({ type: null, data: null });
@@ -94,8 +94,6 @@
       const [isBgUploading, setIsBgUploading] = useState(false);
       const [selectedFiles, setSelectedFiles] = useState([]);
       const [lightboxImg, setLightboxImg] = useState(null);
-      
-      // 다운로드 진행 상태 추적 (어떤 파일이 다운로드 중인지 ID 저장)
       const [downloadingId, setDownloadingId] = useState(null);
 
       const [systemSettings, setSystemSettings] = useState({
@@ -138,29 +136,39 @@
         }
       }, [isFirebaseConfigured]);
 
+      // 변경된 로그인 처리 로직
       const handleLogin = (e) => {
         e.preventDefault();
-        if (!loginName.trim() || !loginPw.trim()) { alert('입력해주세요.'); return; }
         let userData = null;
-        if (isAdminLogin || loginName.trim() === 'admin818') {
-          if (loginPw !== systemSettings.adminPw) { alert('비밀번호 오류'); return; }
-          userData = { name: 'admin818', role: 'admin', isAdmin: true };
+
+        if (isAdminMode) {
+          // 관리자 로그인: 비밀번호만 검증
+          if (!loginPw.trim()) { alert('비밀번호를 입력하라.'); return; }
+          if (loginPw !== systemSettings.adminPw) { alert('비밀번호가 일치하지 않는다.'); return; }
+          userData = { name: '관리자', role: 'admin', isAdmin: true, id: 'admin' };
         } else {
+          // 참여자 로그인: 이름만 입력하면 패스
+          if (!loginName.trim()) { alert('이름을 입력하라.'); return; }
           userData = { name: loginName.trim(), role: 'user', isAdmin: false, id: loginName.trim() };
+          
           if (isFirebaseConfigured && db) {
-            db.collection('participants').doc(loginName.trim()).set({ name: loginName.trim(), lastLogin: new Date().toISOString(), role: 'user' }, { merge: true });
+            db.collection('participants').doc(loginName.trim()).set({ 
+              name: loginName.trim(), 
+              lastLogin: new Date().toISOString(), 
+              role: 'user' 
+            }, { merge: true });
           }
         }
+        
         setUser(userData);
         if (rememberMe) localStorage.setItem('training_user', JSON.stringify(userData));
       };
 
       const handleLogout = () => { setUser(null); localStorage.removeItem('training_user'); };
 
-      // 로딩 스피너가 포함된 개선된 다운로드 함수
       const handleDownload = async (targetId, fileUrl, fileName) => {
-        if (downloadingId) return; // 중복 클릭 방지
-        setDownloadingId(targetId); // 로딩 시작
+        if (downloadingId) return;
+        setDownloadingId(targetId);
         
         try {
           const response = await fetch(fileUrl);
@@ -185,10 +193,9 @@
             window.URL.revokeObjectURL(blobUrl);
           }
         } catch (err) {
-          // 보안/CORS 문제로 가져오지 못한 경우 새 창 열기 (Fallback)
           window.open(fileUrl, '_blank');
         } finally {
-          setDownloadingId(null); // 로딩 종료
+          setDownloadingId(null);
         }
       };
 
@@ -405,28 +412,39 @@
       const sortedScheduleDates = Object.keys(groupedSchedules).sort();
       sortedScheduleDates.forEach(k => groupedSchedules[k].sort((a,b) => (a.startTime || '').localeCompare(b.startTime || '')));
 
+      // 직관적이고 깔끔하게 개편된 로그인 화면 (이미지 디자인 반영)
       if (!user) {
         return (
-          <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-sky-500 via-blue-600 to-sky-800">
-            <div className="w-full max-w-md bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl p-6 sm:p-8 space-y-6">
-              <div className="text-center space-y-2">
-                <div className="inline-flex p-3 bg-sky-100 text-sky-600 rounded-full mb-2"><Icon name="plane" size={32} /></div>
-                <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">{systemSettings?.title || "로딩 중..."}</h1>
-                <p className="text-sm text-slate-500">{systemSettings?.description || ""}</p>
+          <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 sm:bg-slate-100">
+            <div className="w-full max-w-sm bg-white rounded-3xl shadow-xl p-8 space-y-7 border border-slate-100">
+              <div className="text-center pb-2">
+                <h1 className="text-2xl font-bold text-blue-600 tracking-tight">{systemSettings?.title || "로딩 중..."}</h1>
               </div>
-              <div className="flex bg-slate-100 p-1 rounded-xl mb-4">
-                <button type="button" className={`flex-1 py-2 text-sm font-semibold rounded-lg ${!isAdminLogin?'bg-white text-sky-600 shadow-sm':'text-slate-500'}`} onClick={()=>setIsAdminLogin(false)}>참여자</button>
-                <button type="button" className={`flex-1 py-2 text-sm font-semibold rounded-lg ${isAdminLogin?'bg-white text-sky-600 shadow-sm':'text-slate-500'}`} onClick={()=>setIsAdminLogin(true)}>관리자</button>
-              </div>
+              
               <form onSubmit={handleLogin} className="space-y-4">
-                <input name="name" required placeholder={isAdminLogin?'관리자 ID':'이름'} value={loginName} onChange={(e)=>setLoginName(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm" />
-                <input name="pw" type="password" required placeholder="비밀번호" value={loginPw} onChange={(e)=>setLoginPw(e.target.value)} className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm" />
-                <label className="flex items-center space-x-2 text-sm text-slate-600 cursor-pointer">
-                  <input type="checkbox" checked={rememberMe} onChange={(e)=>setRememberMe(e.target.checked)} className="w-4 h-4 text-sky-600 rounded" />
+                {!isAdminMode ? (
+                  <input name="name" required placeholder="이름을 입력하세요" value={loginName} onChange={(e)=>setLoginName(e.target.value)} className="w-full px-4 py-3.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
+                ) : (
+                  <input name="pw" type="password" required placeholder="관리자 비밀번호를 입력하세요" value={loginPw} onChange={(e)=>setLoginPw(e.target.value)} className="w-full px-4 py-3.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
+                )}
+                
+                <label className="flex items-center space-x-2 text-sm text-slate-600 cursor-pointer px-1">
+                  <input type="checkbox" checked={rememberMe} onChange={(e)=>setRememberMe(e.target.checked)} className="w-4 h-4 text-blue-500 rounded border-slate-300 focus:ring-blue-500" />
                   <span>로그인 상태 유지</span>
                 </label>
-                <button type="submit" className="w-full py-3.5 bg-sky-500 text-white font-bold rounded-xl shadow-lg text-sm">접속하기</button>
+                
+                <button type="submit" className="w-full py-3.5 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl shadow-sm text-sm transition-colors mt-2">
+                  입장하기
+                </button>
               </form>
+
+              <div className="text-center pt-3">
+                {!isAdminMode ? (
+                  <button type="button" onClick={() => setIsAdminMode(true)} className="text-xs font-medium text-slate-500 hover:text-slate-700">관리자로 접속하기</button>
+                ) : (
+                  <button type="button" onClick={() => setIsAdminMode(false)} className="text-xs font-medium text-slate-500 hover:text-slate-700">참여자로 접속하기</button>
+                )}
+              </div>
             </div>
           </div>
         );
@@ -594,7 +612,6 @@
                         <div className="flex justify-between items-center pt-2 mt-2 border-t border-slate-50">
                           <span className="text-[11px] text-slate-400">{p.author}</span>
                           <div className="flex space-x-3 items-center">
-                            {/* 퀵 다운로드: 가벼운 썸네일(p.url) 우선 다운로드로 속도 극대화 */}
                             <button onClick={(e) => { e.stopPropagation(); handleDownload(p.id, p.url, `photo_${Date.now()}.jpg`); }} className="text-sky-500 hover:text-sky-700 disabled:opacity-50" disabled={downloadingId === p.id}>
                               {downloadingId === p.id ? <Icon name="loader" className="animate-spin" size={16} /> : <Icon name="download" size={16} />}
                             </button>
@@ -685,7 +702,6 @@
                 <img src={lightboxImg.originalUrl || lightboxImg.url} className="max-h-[75vh] w-auto rounded-xl" />
                 <div className="mt-4 text-center text-white space-y-2">
                   <p>{renderTextWithLinks(lightboxImg.caption)}</p>
-                  {/* 라이트박스 다운로드: 고품질 원본(originalUrl)을 다운로드하도록 설정 */}
                   <button onClick={() => handleDownload('lightbox', lightboxImg.originalUrl || lightboxImg.url, `training_photo_orig_${Date.now()}.jpg`)} disabled={downloadingId === 'lightbox'} className="inline-flex items-center gap-1.5 px-4 py-2 bg-sky-500 text-white font-bold rounded-xl text-xs disabled:bg-slate-400">
                     {downloadingId === 'lightbox' ? <Icon name="loader" className="animate-spin" size={16} /> : <Icon name="download" size={16} />} 
                     {downloadingId === 'lightbox' ? '원본 로딩 중...' : '원본 기기에 저장하기'}
@@ -779,7 +795,7 @@
                           </div>
                         )}
                         <input name="caption" placeholder="사진 캡션 (설명)" className="w-full p-3 border rounded-xl text-sm" />
-                        {isUploading && <p className="text-xs text-sky-500 animate-pulse pt-2">선택한 사진들을 최적화하여 일괄 업로드 중이다...</p>}
+                        {isUploading && <p className="text-xs text-sky-500 animate-pulse pt-2">선택한 사진들을 일괄 업로드 중이다...</p>}
                       </>
                     )}
 
