@@ -86,7 +86,7 @@
       const [loginName, setLoginName] = useState('');
       const [loginPw, setLoginPw] = useState('');
       const [rememberMe, setRememberMe] = useState(true);
-      const [isAdminMode, setIsAdminMode] = useState(false); // 관리자 모드 상태
+      const [isAdminMode, setIsAdminMode] = useState(false); 
 
       const [activeTab, setActiveTab] = useState('schedule');
       const [modalState, setModalState] = useState({ type: null, data: null });
@@ -136,18 +136,15 @@
         }
       }, [isFirebaseConfigured]);
 
-      // 변경된 로그인 처리 로직
       const handleLogin = (e) => {
         e.preventDefault();
         let userData = null;
 
         if (isAdminMode) {
-          // 관리자 로그인: 비밀번호만 검증
           if (!loginPw.trim()) { alert('비밀번호를 입력하라.'); return; }
           if (loginPw !== systemSettings.adminPw) { alert('비밀번호가 일치하지 않는다.'); return; }
           userData = { name: '관리자', role: 'admin', isAdmin: true, id: 'admin' };
         } else {
-          // 참여자 로그인: 이름만 입력하면 패스
           if (!loginName.trim()) { alert('이름을 입력하라.'); return; }
           userData = { name: loginName.trim(), role: 'user', isAdmin: false, id: loginName.trim() };
           
@@ -412,7 +409,6 @@
       const sortedScheduleDates = Object.keys(groupedSchedules).sort();
       sortedScheduleDates.forEach(k => groupedSchedules[k].sort((a,b) => (a.startTime || '').localeCompare(b.startTime || '')));
 
-      // 직관적이고 깔끔하게 개편된 로그인 화면 (이미지 디자인 반영)
       if (!user) {
         return (
           <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 sm:bg-slate-100">
@@ -601,6 +597,19 @@
                   <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Icon name="image" size={22} className="text-sky-500" /> 사진</h2>
                   <button onClick={() => setModalState({ type: 'upload_photo' })} className="px-3 py-2 bg-sky-500 text-white text-xs font-bold rounded-xl"><Icon name="camera" size={16} /> 올리기</button>
                 </div>
+
+                {/* 구글 드라이브 대용량 취합 배너 추가 */}
+                <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex items-center justify-between shadow-sm">
+                  <div>
+                    <h3 className="text-sm font-bold text-blue-800">📁 원본/대용량 사진 제출</h3>
+                    <p className="text-xs text-blue-600 mt-1">구글 드라이브 개인별 폴더에 올려라.</p>
+                  </div>
+                  <a href="https://drive.google.com/drive/folders/13_sWjbXT6LGkPjdmeeADIhxpGC4Mi8rt?usp=sharing" target="_blank" rel="noopener noreferrer" className="px-3 py-2 bg-blue-500 text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow-sm hover:bg-blue-600">
+                    <Icon name="external-link" size={16} />
+                    드라이브 열기
+                  </a>
+                </div>
+
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {photos.map((p) => (
                     <div key={p.id} className="bg-white rounded-2xl overflow-hidden border shadow-sm flex flex-col relative group">
